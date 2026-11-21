@@ -576,6 +576,11 @@ private struct PromptCard: View {
         }
     }
 
+    /// The question is whether a script may use a secret that is already saved.
+    private var asksPermission: Bool {
+        prompt.kind == .confirm && prompt.secretName != nil
+    }
+
     private var typesAnswer: Bool {
         switch prompt.kind {
         case .text, .number, .secret: true
@@ -585,7 +590,7 @@ private struct PromptCard: View {
 
     private var question: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(systemName: "questionmark.bubble.fill")
+            Image(systemName: asksPermission ? "key.fill" : "questionmark.bubble.fill")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
                 Text(prompt.message)
@@ -595,7 +600,11 @@ private struct PromptCard: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if prompt.secretName != nil {
+                if asksPermission {
+                    Text("This script has not used this secret before. Allow it only if you trust what the script does with it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if prompt.secretName != nil {
                     Text("Saved in your Keychain, so you are only asked once.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -628,8 +637,8 @@ private struct PromptCard: View {
                 .disabled(prompt.secretName != nil && text.isEmpty)
         case .confirm:
             Picker("Answer", selection: $yes) {
-                Text("No").tag(false)
-                Text("Yes").tag(true)
+                Text(asksPermission ? "Don’t Allow" : "No").tag(false)
+                Text(asksPermission ? "Allow" : "Yes").tag(true)
             }
             .pickerStyle(.segmented)
             .labelsHidden()

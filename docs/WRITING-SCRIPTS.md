@@ -227,7 +227,9 @@ const token = await secrets.get("GITHUB_TOKEN", "A GitHub personal access token"
 const res = await get(url, { headers: { Authorization: `Bearer ${token}` } });
 ```
 
-The first time, the user is asked for the value and it is saved in the Keychain. After that it is returned without asking. The same name gives the same secret in every script, so name it for what it is, in capitals. Secrets can also be added and removed in Settings > Secrets.
+The first time, the user is asked for the value and it is saved in the Keychain. After that it is returned without asking. The same name is the same secret in every script, so name it for what it is, in capitals. Secrets can also be added and removed in Settings > Secrets.
+
+A script gets a saved secret without a question only if the user typed it in for that script. When another script asks for the same name, the user is asked once whether that script may use it; saying no fails the call with an error. Settings > Secrets shows which scripts use each secret.
 
 A value from `secrets.get()` is blanked in everything the run shows or keeps: the log, recorded HTTP and AI calls, errors, published values, names and notifications. It is not blanked in files the script writes, so do not put it there.
 
@@ -357,7 +359,7 @@ A run started by a schedule, a watched folder or the Shortcuts app has nobody to
 - `input.ask()` and `input.confirm()` resolve to their default. Without a default, the run fails.
 - `input.form()` resolves to its fields' defaults. A required field without a default fails the run.
 - `input.file()` returns a file the run was given: the file that arrived in the watched folder, or the Files of the Shortcuts action. If there is none, the run fails.
-- `secrets.get()` returns a saved secret. If it is not saved yet, the run fails and says so. Add it in Settings, or run the script once by hand.
+- `secrets.get()` returns a saved secret the script has been allowed. If the secret is not saved yet, or the script has not been allowed it, the run fails and says so. Run the script once by hand to be asked.
 
 So in a script meant to run unattended:
 

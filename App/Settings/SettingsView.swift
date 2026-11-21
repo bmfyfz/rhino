@@ -403,11 +403,14 @@ private struct SecretsPane: View {
         Form {
             Section {
                 ForEach(model.secretNames, id: \.self) { name in
-                    LabeledContent(name) {
-                        Text(String(repeating: "•", count: 8))
-                            .foregroundStyle(.tertiary)
-                        Button("Remove", role: .destructive) { model.removeSecret(named: name) }
-                            .controlSize(.small)
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent(name) {
+                            Text(String(repeating: "•", count: 8))
+                                .foregroundStyle(.tertiary)
+                            Button("Remove", role: .destructive) { model.removeSecret(named: name) }
+                                .controlSize(.small)
+                        }
+                        access(to: name)
                     }
                 }
                 HStack {
@@ -424,12 +427,34 @@ private struct SecretsPane: View {
                     Text(problem).foregroundStyle(.red)
                 }
             } footer: {
-                Text("Keys and tokens your scripts use. They are kept in your Keychain and shared by every script that asks for the same name. A script asks for a missing one the first time you run it.")
+                Text("Keys and tokens your scripts use, kept in your Keychain. A script asks for a missing one the first time you run it. Before any other script can use a saved one, you are asked to allow it.")
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The scripts that may use a secret, each with a way to take it back.
+    @ViewBuilder private func access(to name: String) -> some View {
+        let scripts = model.secretAccess[name] ?? []
+        if scripts.isEmpty {
+            Text("No script uses it yet")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(scripts, id: \.self) { id in
+                HStack {
+                    Label(model.scripts.first { $0.id == id }?.name ?? id, systemImage: "doc.text")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Stop Using") { model.revokeSecret(named: name, from: id) }
+                        .controlSize(.small)
+                        .help("This script will have to ask before it uses the secret again")
+                }
+            }
+        }
     }
 
     private func add() {

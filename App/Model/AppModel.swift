@@ -27,8 +27,12 @@ final class AppModel {
     private(set) var scriptVersions: [ScriptVersion] = []
     /// Whether the versions browser is showing.
     var showsVersions = false
+    /// Which scripts may read which saved secrets.
+    let grants: FileSecretGrants
     /// The saved secrets' names, for Settings. Values are never read for display.
     private(set) var secretNames: [String] = []
+    /// The ids of the scripts allowed to read each secret, by its name.
+    private(set) var secretAccess: [String: [String]] = [:]
 
     private(set) var scripts: [Script] = [] {
         didSet {
@@ -190,6 +194,7 @@ final class AppModel {
         let support = URL.applicationSupportDirectory.appending(path: "Rhino", directoryHint: .isDirectory)
         store = ScriptStore(directory: support.appending(path: "Scripts", directoryHint: .isDirectory))
         memory = FileMemoryStore(directory: support.appending(path: "Memory", directoryHint: .isDirectory))
+        grants = FileSecretGrants(file: support.appending(path: "SecretAccess.json"))
         versions = ScriptVersions(directory: support.appending(path: "Versions", directoryHint: .isDirectory))
         functions = SharedLibrary(directory: support.appending(path: "Functions", directoryHint: .isDirectory))
         let runHistory = RunHistory(url: support.appending(path: "History.store"))
@@ -198,6 +203,7 @@ final class AppModel {
             provider: store,
             runsDirectory: support.appending(path: "Runs", directoryHint: .isDirectory),
             secrets: secrets,
+            grants: grants,
             memory: memory,
             ai: ConfiguredAI(settings: ai),
             // `input.from()` reads other scripts' runs from the same history the window shows.
@@ -206,7 +212,7 @@ final class AppModel {
             // Scripts may not rewrite each other, the shared functions, or what the app remembers.
             protectedDirectories: [support]
         )
-        secretNames = secrets.names()
+        refreshSecretNames()
         history = runHistory.listings()
         if let problem = runHistory.problem {
             reportedHistoryProblem = true
@@ -390,6 +396,7 @@ final class AppModel {
         for (old, new) in renamed {
             runHistory.rename(script: old, to: new)
             memory.rename(script: old, to: new)
+            grants.rename(script: old, to: new)
             versions.rename(old, to: new)
             for run in history[old] ?? [] { loaded[run.id] = nil }
             history[new] = history.removeValue(forKey: old)
@@ -439,6 +446,8 @@ final class AppModel {
             inputFiles[id] = nil
             // A script that is gone has nothing left to remember.
             try? memory.clear(script: id)
+            // Nor may a later script with the same name inherit its secrets.
+            grants.forget(script: id)
             versions.removeAll(of: id)
             approvals[id] = nil
             scripts = store.scripts()
@@ -454,18 +463,27 @@ final class AppModel {
     func saveSecret(_ value: String, named name: String) -> Bool {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !value.isEmpty, secrets.save(value, named: name) else { return false }
-        secretNames = secrets.names()
+        refreshSecretNames()
         return true
     }
 
     func removeSecret(named name: String) {
         secrets.remove(named: name)
-        secretNames = secrets.names()
+        grants.forget(secret: name)
+        refreshSecretNames()
     }
 
-    /// A run may have saved a secret the user was asked for.
+    /// Takes a secret away from one script; it has to ask again.
+    func revokeSecret(named name: String, from script: String) {
+        grants.revoke(script: script, secret: name)
+        refreshSecretNames()
+    }
+
+    /// A run may have saved a secret the user was asked for, or been
+    /// allowed one.
     func refreshSecretNames() {
         secretNames = secrets.names()
+        secretAccess = grants.all()
     }
 
     func remembersAnything(_ id: String) -> Bool {
@@ -702,6 +720,12 @@ final class AppModel {
             }
             guard generation == aiGeneration, allowed else { return nil }
             approvals[script.id] = footprint.keys
+            // The sheet named the saved secrets it reads; the yes covers
+            // them, so the run does not ask about each one again.
+            for case .secret(let name) in additions where secretNames.contains(name) {
+                grants.allow(script: script.id, secret: name)
+            }
+            refreshSecretNames()
         }
 
         aiActivity = .trying

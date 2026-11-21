@@ -352,10 +352,14 @@ declare const console: {
  *   const res = await get(url, { headers: { Authorization: `Bearer ${token}` } });
  *
  * The first time, the user is asked for the value and it is saved. After
- * that it is simply returned, on scheduled runs too. The same name gives the
+ * that it is simply returned, on scheduled runs too. The same name is the
  * same secret in every script, so name it for what it is, in capitals:
  * "GITHUB_TOKEN", "OPENWEATHER_API_KEY". `description` is what the user reads
  * when asked: say what it is and, if it helps, where to get it.
+ *
+ * A secret another script saved is not handed over silently: the user is
+ * asked once whether this script may use it, and a run nobody is watching
+ * fails until they have said yes.
  */
 declare const secrets: {
   get(name: string, description?: string): Promise<string>;

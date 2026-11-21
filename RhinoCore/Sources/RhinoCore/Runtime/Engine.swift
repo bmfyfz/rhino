@@ -33,6 +33,7 @@ public final class Engine: Sendable {
     private let runsDirectory: URL
     private let session: URLSession
     private let secrets: any SecretStore
+    private let grants: (any SecretGrants)?
     private let memory: any MemoryStore
     private let ai: (any AIProvider)?
     private let archive: (any RunArchive)?
@@ -42,6 +43,9 @@ public final class Engine: Sendable {
     /// - Parameters:
     ///   - secrets: Where `secrets.get()` reads and saves. Without one,
     ///     secrets last only as long as the engine.
+    ///   - grants: Which scripts may read which saved secrets; a script
+    ///     that has no grant makes the user be asked. Without one, every
+    ///     script may read every saved secret.
     ///   - memory: Where `memory` keeps what scripts remember. Without one,
     ///     it lasts only as long as the engine.
     ///   - ai: What answers `ai.ask()`. Without one, scripts that call it fail.
@@ -56,6 +60,7 @@ public final class Engine: Sendable {
         runsDirectory: URL,
         session: URLSession = .shared,
         secrets: any SecretStore = InMemorySecretStore(),
+        grants: (any SecretGrants)? = nil,
         memory: any MemoryStore = InMemoryMemoryStore(),
         ai: (any AIProvider)? = nil,
         archive: (any RunArchive)? = nil,
@@ -66,6 +71,7 @@ public final class Engine: Sendable {
         self.runsDirectory = runsDirectory
         self.session = session
         self.secrets = secrets
+        self.grants = grants
         self.memory = memory
         self.ai = ai
         self.archive = archive
@@ -99,6 +105,7 @@ public final class Engine: Sendable {
             outputDirectory: runsDirectory.appending(path: folder, directoryHint: .isDirectory),
             interactive: interactive,
             secrets: secrets,
+            grants: grants,
             memory: memory,
             ai: ai,
             archive: archive,

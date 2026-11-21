@@ -111,3 +111,123 @@ import Testing
         #expect((try json(await engine.run("counter").resultJSON) as? [String: Any])?["runs"] as? Int == 1)
     }
 }
+
+/// Which script may read which saved secret: the one that asked for it, and
+/// any other only after the user said so.
+@Suite struct SecretGrantTests {
+    private static let reader = """
+    // @name Reader
+    output.json({ token: (await secrets.get("API_TOKEN")).length });
+    """
+    private static let owner = """
+    // @name Owner
+    await secrets.get("API_TOKEN", "The token for the test API");
+    """
+
+    private func makeEngine(_ sources: [String: String], secrets: any SecretStore, grants: any SecretGrants) -> Engine {
+        let runs = FileManager.default.temporaryDirectory.appending(path: "rhino-tests-\(UUID().uuidString)")
+        return Engine(provider: Scripts(sources: sources), runsDirectory: runs, session: stubbedSession(), secrets: secrets, grants: grants)
+    }
+
+    private func prompts(_ recorder: Recorder) -> [PromptRequest] {
+        recorder.events.compactMap { if case .prompt(let request) = $0 { request } else { nil } }
+    }
+
+    @Test func theScriptThatAskedForASecretKeepsIt() async {
+        let secrets = InMemorySecretStore()
+        let grants = InMemorySecretGrants()
+        let engine = makeEngine(["owner": Self.owner], secrets: secrets, grants: grants)
+
+        let first = Recorder { _ in .text("s3cr3t-value") }
+        #expect(await engine.run("owner", interactive: true, events: first.record).error == nil)
+        #expect(prompts(first).map(\.kind) == [.secret])
+        #expect(grants.allows(script: "owner", secret: "API_TOKEN"))
+
+        // From then on it reads the secret without a question, unattended too.
+        let later = Recorder()
+        #expect(await engine.run("owner", events: later.record).error == nil)
+        #expect(prompts(later).isEmpty)
+    }
+
+    @Test func anotherScriptHasToBeAllowedFirst() async throws {
+        let grants = InMemorySecretGrants(["API_TOKEN": ["owner"]])
+        let engine = makeEngine(
+            ["owner": Self.owner, "reader": Self.reader],
+            secrets: InMemorySecretStore(["API_TOKEN": "s3cr3t-value"]), grants: grants
+        )
+
+        // With nobody to ask, it does not get the secret.
+        let unattended = await engine.run("reader").error?.message
+        #expect(unattended == "“Reader” has not been allowed to use the saved secret “API_TOKEN”. Run it once by hand to be asked.")
+
+        // The user is asked, by the script's name, and the answer on offer is no.
+        let refused = Recorder { _ in .bool(false) }
+        let denied = await engine.run("reader", interactive: true, events: refused.record)
+        let question = try #require(prompts(refused).first)
+        #expect(question.kind == .confirm)
+        #expect(question.secretName == "API_TOKEN")
+        #expect(question.message == "Allow “Reader” to use your saved secret “API_TOKEN”?")
+        #expect(question.defaultText == "false")
+        #expect(denied.error?.message.contains("did not allow") == true)
+        #expect(!grants.allows(script: "reader", secret: "API_TOKEN"))
+
+        // Closing the question is not a yes either.
+        let dismissed = await engine.run("reader", interactive: true, events: Recorder().record)
+        #expect(dismissed.error?.message.contains("Cancelled") == true)
+        #expect(!grants.allows(script: "reader", secret: "API_TOKEN"))
+
+        // A yes hands the secret over, masked as ever, and is remembered.
+        let agreed = Recorder { _ in .bool(true) }
+        let allowed = await engine.run("reader", interactive: true, events: agreed.record)
+        #expect(try json(allowed.resultJSON) as? NSDictionary == ["token": 12])
+        #expect(grants.allows(script: "reader", secret: "API_TOKEN"))
+
+        let later = Recorder()
+        #expect(await engine.run("reader", events: later.record).error == nil)
+        #expect(prompts(later).isEmpty)
+    }
+
+    @Test func aScriptRunByAnotherNeedsItsOwnPermission() async throws {
+        // The pipeline may read the secret; the step it runs may not, and
+        // does not inherit it.
+        let grants = InMemorySecretGrants(["API_TOKEN": ["chain"]])
+        let engine = makeEngine(
+            ["chain": #"await secrets.get("API_TOKEN"); output.json(await run("reader"));"#, "reader": Self.reader],
+            secrets: InMemorySecretStore(["API_TOKEN": "s3cr3t-value"]), grants: grants
+        )
+        #expect(await engine.run("chain").error?.message.contains("“Reader” has not been allowed") == true)
+
+        let agreed = Recorder { _ in .bool(true) }
+        #expect(await engine.run("chain", interactive: true, events: agreed.record).error == nil)
+        #expect(prompts(agreed).map(\.message) == ["Allow “Reader” to use your saved secret “API_TOKEN”?"])
+        #expect(grants.allows(script: "reader", secret: "API_TOKEN"))
+    }
+
+    @Test func grantsAreKeptInAFileAndFollowTheScript() throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "rhino-grants-\(UUID().uuidString)/Secrets.json")
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let grants = FileSecretGrants(file: file)
+        #expect(!grants.allows(script: "weather", secret: "API_TOKEN"))
+
+        grants.allow(script: "weather", secret: "API_TOKEN")
+        grants.allow(script: "weather", secret: "API_TOKEN")
+        grants.allow(script: "AI/digest", secret: "API_TOKEN")
+        grants.allow(script: "weather", secret: "OTHER")
+        #expect(FileSecretGrants(file: file).all() == ["API_TOKEN": ["AI/digest", "weather"], "OTHER": ["weather"]])
+        // The file holds names only.
+        #expect(try String(contentsOf: file, encoding: .utf8).contains("weather"))
+
+        // A moved script keeps what it was allowed; the old id keeps nothing.
+        grants.rename(script: "weather", to: "Home/weather")
+        #expect(grants.allows(script: "Home/weather", secret: "OTHER"))
+        #expect(!grants.allows(script: "weather", secret: "API_TOKEN"))
+
+        grants.revoke(script: "AI/digest", secret: "API_TOKEN")
+        #expect(grants.all() == ["API_TOKEN": ["Home/weather"], "OTHER": ["Home/weather"]])
+
+        // A deleted script, or a removed secret, leaves nothing behind.
+        grants.forget(secret: "OTHER")
+        grants.forget(script: "Home/weather")
+        #expect(grants.all().isEmpty)
+    }
+}

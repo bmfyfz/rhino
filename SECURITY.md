@@ -17,7 +17,8 @@ Worth reporting:
 Not a vulnerability, because it is how Rhino works (see below):
 
 - A script can read and write your files and make network requests.
-- A script can read every secret saved in Rhino.
+- A script you allowed to use a secret can send it anywhere.
+- A script that runs commands with `shell()` can get around what Rhino itself checks.
 
 ## Trust model
 
@@ -27,11 +28,11 @@ Read this before you run a script you did not write.
 
 **What scripts cannot do.** A script runs in JavaScriptCore with only the globals in `globals.d.ts`. There is no `import`, `require`, `fetch` or Node API. `write()` and `output.file()` refuse to write into Rhino's own folders (the scripts, the shared functions, memory, versions and the history), so a script cannot quietly rewrite another one that way. Each run started from outside gets a fresh JavaScript context. None of this is a sandbox: `shell()` runs any command, and a command can do anything you can.
 
-**Secrets are shared between scripts.** `secrets.get("NAME")` returns the same value to every script that asks for that name. A script you install can ask for a secret another script saved, and send it anywhere. A secret the user has not saved yet is asked for by name, with a description the script wrote.
+**A script has to be allowed each saved secret.** `secrets.get("NAME")` hands a saved secret to the script the user typed it in for. Any other script, one you just installed or one the AI just wrote, makes Rhino ask "Allow … to use your saved secret …?" first; the answer on offer is no, and a yes is remembered for that script. A run nobody is watching (a schedule, a folder, a shortcut) is never asked and does not get the secret. Settings > Secrets lists which scripts may use each secret and lets you take one back. A secret that is not saved yet is asked for by name, with a description the script wrote. Two limits: once a script has a secret it can send it anywhere, and the list of who may use what is an ordinary file in Rhino's folder (`SecretAccess.json`, names only), which a script that runs `shell()` commands could edit.
 
 **Triggers run scripts while nobody is watching.** A script with `// @schedule` or `// @watch` runs by itself while Rhino is open. A `.js` file placed in the scripts folder with such a header runs without anyone pressing Run. Anything that can write to `~/Library/Application Support/Rhino/Scripts` can therefore run code as you; this is the same trust you give the rest of your home folder.
 
-**AI-written scripts ask before they first run.** The AI writer produces JavaScript from a description. With "Try scripts after writing them" on, in Settings > AI (the default), Rhino runs the script once it is written, and repairs and reruns it if it fails, up to two repairs. Before that first run Rhino reads the code and, unless the script only asks, computes and shows, lists what it reaches for: the hosts it contacts, whether it sends data out, the files it writes, the commands it runs, the secrets it uses. It runs only if you agree, and you are asked again only when a later change adds something new. The list is read from the code, so it shows what the script says it does; an address or command the script puts together while running is listed as such, not resolved. Running a script by hand counts as agreeing to it as it stands. Turn the setting off to read every script before it runs.
+**AI-written scripts ask before they first run.** The AI writer produces JavaScript from a description. With "Try scripts after writing them" on, in Settings > AI (the default), Rhino runs the script once it is written, and repairs and reruns it if it fails, up to two repairs. Before that first run Rhino reads the code and, unless the script only asks, computes and shows, lists what it reaches for: the hosts it contacts, whether it sends data out, the files it writes, the commands it runs, the secrets it uses. It runs only if you agree, and you are asked again only when a later change adds something new. Agreeing also allows the script the saved secrets the list named. The list is read from the code, so it shows what the script says it does; an address or command the script puts together while running is listed as such, not resolved. Running a script by hand counts as agreeing to it as it stands, except for saved secrets, which are always asked about. Turn the setting off to read every script before it runs.
 
 **AI answers are data.** `ai.ask()` returns text or JSON to the script. Rhino does not run an answer as code. What the script then does with it is up to the script.
 

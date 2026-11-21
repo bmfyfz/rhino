@@ -59,7 +59,7 @@ Script API
 - Output: `output.log`, `output.json`, `output.table`, `output.chart`, `output.image`, `output.text`, `output.file`.
 - HTTP: `get`, `post`, `put`, `patch`, `del`, `download`, `upload`.
 - Files and CSV: `read`, `write`, `file.exists`, `file.list`, `csv.parse`, `csv.stringify`.
-- `secrets.get`: passwords, keys and tokens, kept in the Keychain.
+- `secrets.get`: passwords, keys and tokens, kept in the Keychain. A script only gets the ones you allowed it.
 - `memory`: what a script remembers between runs.
 - `ai.ask` and `ai.image`: questions and pictures from an AI model, with answers as plain text or as data in a shape you give.
 - `notify`, `sleep`, `run` to call one script from another, and `input.from` to read what another script last produced.
@@ -159,6 +159,7 @@ Everything is under `~/Library/Application Support/Rhino`:
 | `Memory/` | What each script remembers, one JSON file per script. |
 | `Versions/` | Earlier versions of each script, up to 100 per script. |
 | `History.store` | The database of finished runs. |
+| `SecretAccess.json` | Which scripts may use which saved secret. Names only, no values. |
 
 API keys for AI providers and the secrets scripts ask for are in the Keychain, not in these folders. Which providers are set up, and the other settings, are in the app's preferences.
 

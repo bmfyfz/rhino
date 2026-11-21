@@ -14,6 +14,7 @@ The core never reaches for those services itself. It defines protocols, and the 
 | --- | --- | --- | --- |
 | `ScriptProvider` | Finds a script's source by id or name | `ScriptStore` (also in core: a folder of `.js` files) | A dictionary of sources |
 | `SecretStore` | `secrets.get()` | `KeychainSecretStore` | `InMemorySecretStore` |
+| `SecretGrants` | Which script may read which saved secret | `FileSecretGrants` (in core: one JSON file) | `InMemorySecretGrants` |
 | `MemoryStore` | `memory` | `FileMemoryStore` (in core: one JSON file per script) | `InMemoryMemoryStore` |
 | `AIProvider` | `ai.ask()` and `ai.image()` | `ConfiguredAI`, which picks a provider from Settings | `TestAI` |
 
@@ -60,7 +61,7 @@ project.yml   the XcodeGen description of the app target
 
 8. As the run goes on, `Execution` reports `RunEvent` values: `runStarted`, `runFinished`, `log`, `spanStarted` and `spanFinished` (HTTP and AI calls), `file`, `output`, `prompt`, `promptResolved`, `notification`. They are delivered in order on a background queue. The app passes them through an `AsyncStream` to the main actor, where `RunSession.apply` updates what the window shows.
 
-9. A question (`input.ask`, `input.form`, `input.file`, or `secrets.get` for a secret that is not saved yet) is a `.prompt` event with a `PromptRequest`. The request has a `reply` closure, which is called exactly once with the answer. When `interactive` is false nobody can answer: a question resolves to its default, or fails the run if it has none. Every run that the user did not start by hand is non-interactive.
+9. A question (`input.ask`, `input.form`, `input.file`, or `secrets.get` for a secret that is not saved yet or that the script has not been allowed) is a `.prompt` event with a `PromptRequest`. The request has a `reply` closure, which is called exactly once with the answer. When `interactive` is false nobody can answer: a question resolves to its default, or fails the run if it has none. Every run that the user did not start by hand is non-interactive.
 
 10. Cancelling the task that called `Engine.run` cancels the run. Pending operations fail with "Run cancelled", so the script unwinds through its own error handling.
 
@@ -114,6 +115,7 @@ Everything is under `~/Library/Application Support/Rhino`.
 | Script versions | `Versions/<script>/`, one JSON file per version, 100 kept | `ScriptVersions` (core) |
 | Run history | `History.store`, SwiftData, 50 runs kept per script | `RunHistory` (app) |
 | Script secrets | Keychain, service `app.rhino.Rhino.secrets` | `KeychainSecretStore` (app) |
+| Which script may use which secret | `SecretAccess.json`, names only | `FileSecretGrants` (core) |
 | AI provider keys | Keychain, service `app.rhino.Rhino` | `APIKeyStore` (app) |
 | Provider list and other settings | The app's preferences | `AISettings`, `AppModel` (app) |
 
@@ -125,7 +127,7 @@ Request and response bodies are cut to 512 KB while a run is on screen and to 64
 
 These are visible throughout the code and worth keeping.
 
-- **Protocols at the boundary.** The engine takes `ScriptProvider`, `SecretStore`, `MemoryStore` and `AIProvider`. It has in-memory defaults for secrets and memory, and no AI unless one is given. Nothing in the core knows about the Keychain or the app's settings.
+- **Protocols at the boundary.** The engine takes `ScriptProvider`, `SecretStore`, `SecretGrants`, `MemoryStore` and `AIProvider`. It has in-memory defaults for secrets and memory, and no AI unless one is given. Nothing in the core knows about the Keychain or the app's settings.
 - **Secrets stay out of what is recorded.** Every value a run gets from `secrets.get()` is remembered for that run and blanked out of log lines, recorded URLs, headers and bodies, recorded AI prompts and answers, and notification text. Values shorter than four characters are left alone. The request itself is sent as written. The app keeps API keys and secrets in the Keychain and never writes them to files or preferences.
 - **`globals.d.ts` is the one API reference.** The same file is shown in the app (Help > Script API Reference), given to the AI writer as its reference, and linked from these docs. If the API changes, that file changes.
 - **One context per top-level run, on one queue.** No JavaScript state crosses runs, and no JavaScript value crosses queues.

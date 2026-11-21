@@ -106,7 +106,8 @@ public struct PromptRequest: Identifiable, Sendable {
     /// A form's submit button title. Empty means the default.
     public let submitLabel: String
     /// For a `.secret` asked through `secrets.get()`: the name the answer is
-    /// saved under, so the user can be told it will be kept.
+    /// saved under, so the user can be told it will be kept. For a `.confirm`:
+    /// the saved secret a script asks to be allowed to use.
     public let secretName: String?
     public let reply: @Sendable (Answer) -> Void
 }

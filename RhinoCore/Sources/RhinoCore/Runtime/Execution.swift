@@ -15,6 +15,7 @@ actor Execution {
     let outputDirectory: URL
     let interactive: Bool
     let secrets: any SecretStore
+    let grants: (any SecretGrants)?
     let memory: any MemoryStore
     let ai: (any AIProvider)?
     let archive: (any RunArchive)?
@@ -45,8 +46,15 @@ actor Execution {
     var forms: [UUID: [FormField]] = [:]
     /// Which script each run is of; memory is kept per script.
     var scriptOfRun: [String: String] = [:]
-    /// Questions whose answer is a secret to save, by the name to save it under.
-    var askedSecrets: [UUID: String] = [:]
+    /// A secret a script is waiting for, and which script that is.
+    struct SecretRequest {
+        let name: String
+        let script: String
+    }
+    /// Questions whose answer is a secret to save.
+    var askedSecrets: [UUID: SecretRequest] = [:]
+    /// Questions whether a script may use a secret that is already saved.
+    var secretPermissions: [UUID: SecretRequest] = [:]
     /// The secrets this run has handled, kept out of what it records.
     var masker = SecretMasker()
     /// Chained runs whose published values are shown: the steps of a pipeline.
@@ -66,6 +74,7 @@ actor Execution {
         outputDirectory: URL,
         interactive: Bool,
         secrets: any SecretStore,
+        grants: (any SecretGrants)?,
         memory: any MemoryStore,
         ai: (any AIProvider)?,
         archive: (any RunArchive)?,
@@ -80,6 +89,7 @@ actor Execution {
         self.outputDirectory = outputDirectory
         self.interactive = interactive
         self.secrets = secrets
+        self.grants = grants
         self.memory = memory
         self.ai = ai
         self.archive = archive

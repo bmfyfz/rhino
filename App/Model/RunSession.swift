@@ -264,7 +264,9 @@ final class RunSession: Identifiable {
         questions[request.id]?.answer = switch answer {
         case .text(let text): request.kind == .secret ? String(repeating: "•", count: 8) : text
         case .number(let number): number.formatted()
-        case .bool(let flag): flag ? "Yes" : "No"
+        case .bool(let flag):
+            // A yes or no about a saved secret reads as what it decided.
+            if request.secretName != nil { flag ? "Allowed" : "Not allowed" } else { flag ? "Yes" : "No" }
         case .file(let url): url.lastPathComponent
         case .form(let values):
             request.fields
