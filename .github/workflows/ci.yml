@@ -1,0 +1,23 @@
+name: CI
+
+# Only the core package is tested here. The app target needs Xcode 27 and is
+# not built in CI yet.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: RhinoCore tests
+    # RhinoCore/Package.swift asks for Swift tools 6.4 and macOS 27, so the
+    # runner image has to provide them.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every request in the tests is answered by a stand-in inside the test
+      # process, so no network access or API key is needed.
+      - name: Run tests
+        working-directory: RhinoCore
+        run: swift test

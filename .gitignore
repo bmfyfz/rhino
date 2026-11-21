@@ -1,0 +1,13 @@
+# Build output: Tools/install.sh and xcodebuild write to build/, SwiftPM to .build/
+build/
+.build/
+DerivedData/
+
+# Generated from project.yml by `xcodegen generate`
+*.xcodeproj
+
+# Per-user Xcode state
+xcuserdata/
+
+# macOS
+.DS_Store
