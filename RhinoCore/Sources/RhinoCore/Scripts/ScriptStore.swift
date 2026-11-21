@@ -207,8 +207,9 @@ public struct ScriptStore: ScriptProvider {
         return slug.isEmpty ? "script" : slug
     }
 
-    /// The source of a pipeline: a script that runs others one after another.
-    /// `steps` are the scripts' names, as `run()` would take them.
+    /// The source of a pipeline: a script that runs others one after
+    /// another with `run()`, each handed the result of the one before.
+    /// `steps` are the scripts' names, as `run()` takes them.
     public static func pipeline(name: String, steps: [String]) -> String {
         func quoted(_ text: String) -> String {
             let data = (try? JSONSerialization.data(withJSONObject: text, options: [.fragmentsAllowed, .withoutEscapingSlashes])) ?? Data("\"\"".utf8)
@@ -219,9 +220,11 @@ public struct ScriptStore: ScriptProvider {
         // @name \(name)
         // @description Runs \(order); each step gets the result of the one before
 
-        return await pipeline(
-        \(steps.map { "  \(quoted($0))," }.joined(separator: "\n"))
-        );
+        // { show: true } puts what a step publishes on show here,
+        // as if you had run that step yourself.
+        let data = input.data;
+        \(steps.map { "data = await run(\(quoted($0)), data, { show: true });" }.joined(separator: "\n"))
+        return data;
 
         """
     }

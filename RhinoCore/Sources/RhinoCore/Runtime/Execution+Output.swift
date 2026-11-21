@@ -10,7 +10,7 @@ extension Execution {
     /// `run()`, `output.json()` is what it hands back to its caller.
     func addOutput(runID: String, kind: String, json: String) -> String {
         // A script run by another keeps what it publishes to itself, like a
-        // function's local work, unless it is a step of a pipeline.
+        // function's local work, unless its caller asked for it to be shown.
         guard runID == rootID || publishingRuns.contains(runID), let kind = OutputValue.Kind(rawValue: kind) else { return "" }
         var json = json
         // An image named by a relative path lives in the run's output folder,

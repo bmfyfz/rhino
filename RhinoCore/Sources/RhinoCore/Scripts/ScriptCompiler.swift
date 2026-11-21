@@ -18,7 +18,7 @@ public enum ScriptCompiler {
         "input", "output", "secrets", "memory", "ai",
         "get", "post", "put", "patch", "del", "http",
         "download", "upload", "read", "write", "file", "csv",
-        "console", "sleep", "notify", "shell", "run", "pipeline",
+        "console", "sleep", "notify", "shell", "run",
     ]
 
     /// Returns an expression that evaluates to `function (api) -> Promise<returned value>`.

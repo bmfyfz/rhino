@@ -2,7 +2,7 @@ import RhinoCore
 import SwiftUI
 
 /// Putting a pipeline together: a name, and the scripts to run in order.
-/// What it makes is an ordinary script of one `pipeline(...)` call, which
+/// What it makes is an ordinary script of `run()` calls, one per step, which
 /// can be edited, scheduled and versioned like any other.
 struct PipelineSheet: View {
     private struct Step: Identifiable {
@@ -50,7 +50,7 @@ struct PipelineSheet: View {
                 } header: {
                     Text("Steps")
                 } footer: {
-                    Text("Each step gets the result of the one before as its input.data. If a step fails, the pipeline stops there and says which one.")
+                    Text("Each step gets the result of the one before as its input.data. If a step fails, the pipeline stops there.")
                         .foregroundStyle(.secondary)
                 }
             }

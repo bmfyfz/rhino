@@ -166,19 +166,6 @@ public struct ScriptFootprint: Hashable, Sendable {
         for call in calls("run") {
             found.insert(.runs(call.literal ?? "one it names while running"))
         }
-        if !calls("pipeline").isEmpty {
-            // Every text in a pipeline's list is a script it runs.
-            if let pattern = try? NSRegularExpression(pattern: "(?<![\\w$.])pipeline\\s*\\(([^;]*?)\\)\\s*;?") {
-                let whole = NSRange(location: 0, length: (readableText as NSString).length)
-                for match in pattern.matches(in: codeText, range: whole) {
-                    let arguments = match.range(at: 1)
-                    for string in strings where string.lowerBound >= arguments.location && string.upperBound <= NSMaxRange(arguments) {
-                        let name = (readableText as NSString).substring(with: NSRange(location: string.lowerBound + 1, length: max(0, string.count - 2)))
-                        found.insert(.runs(name))
-                    }
-                }
-            }
-        }
         if !calls("eval|Function|new\\s+Function").isEmpty { found.insert(.buildsCode) }
 
         items = found

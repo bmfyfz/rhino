@@ -188,7 +188,7 @@ import Testing
     }
 
     @Test func aScriptRunByAnotherNeedsItsOwnPermission() async throws {
-        // The pipeline may read the secret; the step it runs may not, and
+        // The calling script may read the secret; the one it runs may not, and
         // does not inherit it.
         let grants = InMemorySecretGrants(["API_TOKEN": ["chain"]])
         let engine = makeEngine(

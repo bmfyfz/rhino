@@ -982,42 +982,10 @@
             return result;
           });
         },
-        run: function (name, input) { return exec(String(name), input, runId, depth + 1, files); },
-        // Scripts one after another, each handed the result of the one
-        // before. A function in the list is a step too, for glue in between.
-        pipeline: function () {
-          const steps = Array.prototype.slice.call(arguments.length === 1 && Array.isArray(arguments[0]) ? arguments[0] : arguments);
-          if (steps.length === 0) {
-            throw new Error("pipeline() needs at least one step, for example pipeline(\"Fetch orders\", \"Build report\").");
-          }
-          steps.forEach(function (step, index) {
-            if (typeof step !== "string" && typeof step !== "function") {
-              throw new Error("pipeline(): step " + (index + 1) + " is neither a script's name nor a function.");
-            }
-          });
-          const site = new Error();
-          return (async function () {
-            // The first step gets what the pipeline itself was handed.
-            let value = data === undefined ? null : data;
-            for (let index = 0; index < steps.length; index++) {
-              const step = steps[index];
-              const label = typeof step === "string" ? step : step.name || "a function";
-              const place = "Step " + (index + 1) + " of " + steps.length;
-              host.log(runId, "info", place + ": " + label);
-              try {
-                value = typeof step === "string"
-                  ? await exec(step, value, runId, depth + 1, files, true)
-                  : await step(value);
-              } catch (error) {
-                // The same error, saying which step it was; its place in the
-                // code stays the place where it really happened.
-                const reason = error && error.message ? error.message : String(error);
-                throw failure(error && error.stack ? error : site, place + ", “" + label + "”, failed: " + reason);
-              }
-              if (value === undefined) value = null;
-            }
-            return value;
-          })();
+        // `{ show: true }` puts what the other script publishes on show in
+        // this run; without it, that stays the other script's own business.
+        run: function (name, input, options) {
+          return exec(String(name), input, runId, depth + 1, files, !!(options && options.show === true));
         },
       },
       // What the script produced: the value given to output.json(), or failing
@@ -1028,8 +996,9 @@
 
   // -------------------------------------------------------------- execution
 
-  // `publishes` is for the steps of a pipeline: what they publish is shown,
-  // as if the user had run them, instead of staying inside the call.
+  // `publishes` is `run(name, data, { show: true })`: what the script
+  // publishes is shown, as if the user had run it, instead of staying inside
+  // the call.
   async function exec(name, data, parentId, depth, files, publishes) {
     if (depth > 32) {
       throw new Error('run("' + name + '") is nested more than 32 levels deep. Is a script calling itself?');

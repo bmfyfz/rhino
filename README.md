@@ -62,10 +62,10 @@ Script API
 - `secrets.get`: passwords, keys and tokens, kept in the Keychain. A script only gets the ones you allowed it.
 - `memory`: what a script remembers between runs.
 - `ai.ask` and `ai.image`: questions and pictures from an AI model, with answers as plain text or as data in a shape you give.
-- `notify`, `sleep`, `run` to call one script from another, and `input.from` to read what another script last produced.
+- `notify`, `sleep`, and `input.from` to read what another script last produced.
+- `run` to call one script from another. Chained, with each result handed to the next, that is a pipeline; a pipeline is a script too, so it can be scheduled or triggered like any other.
 - `shell`: run a command as you would in Terminal and use what it prints.
 - Your own shared functions, defined once in Settings and usable in every script.
-- `pipeline`: scripts run one after another, each fed by the one before. A pipeline is a script too, so it can be scheduled or triggered like any other.
 
 Ways to run
 
@@ -107,7 +107,7 @@ A new installation starts with these. Each runs as it is, against a public servi
 | Mac status | `shell()`: disk space, battery and uptime. |
 | AI / Sort feedback | `ai.ask()` with `returns`, so the answer comes back as data. |
 | AI / Summarise stories | `input.from()` to build on another script's last result, then `ai.ask()`. |
-| Pipelines / News digest | `pipeline()`: fetch the front page, then summarise it. |
+| Pipelines / News digest | `run()` twice in a row with `{ show: true }`: fetch the front page, then summarise it. |
 | Pipelines / Compare repositories | `run()` with data, twice in parallel, and a CSV file. |
 
 ![A pipeline: the Hacker News front page fetched by one script and handed to the next](docs/images/news-digest.jpg)

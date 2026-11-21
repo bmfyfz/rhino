@@ -2,7 +2,8 @@ import Foundation
 import Testing
 @testable import RhinoCore
 
-/// `pipeline()`: scripts run one after another, each fed by the one before.
+/// Pipelines: scripts run one after another with `run()`, each fed by the
+/// one before, and `{ show: true }` to put what they publish on show.
 @Suite struct PipelineTests {
     static let steps = [
         "fetch": """
@@ -29,14 +30,20 @@ import Testing
         return (summary, recorder)
     }
 
-    @Test func eachStepGetsTheResultOfTheOneBefore() async throws {
-        let (summary, recorder) = await run(#"return await pipeline("fetch", "clean", "report");"#, data: #"{"since":"Monday"}"#)
+    static let chain = """
+    const fetched = await run("fetch", input.data, { show: true });
+    const paid = await run("clean", fetched, { show: true });
+    return await run("report", paid, { show: true });
+    """
+
+    @Test func eachStepGetsTheResultOfTheOneBeforeAndIsOnShow() async throws {
+        let (summary, recorder) = await run(Self.chain, data: #"{"since":"Monday"}"#)
 
         #expect(summary.error == nil)
         // The last step's result is the pipeline's.
         #expect(try json(summary.resultJSON) as? [String: Int] == ["count": 2])
         #expect(recorder.runs.map(\.script) == ["flow", "fetch", "clean", "report"])
-        #expect(recorder.logs == ["Step 1 of 3: fetch", "Step 2 of 3: clean", "Kept 2 paid orders", "Step 3 of 3: report"])
+        #expect(recorder.logs == ["Kept 2 paid orders"])
 
         // What the steps published is on show, each under the step that made it.
         let scriptOf = Dictionary(uniqueKeysWithValues: recorder.runs.map { ($0.id, $0.script) })
@@ -49,73 +56,81 @@ import Testing
         #expect((try json(first.json) as? [String: Any])?["asked"] as? [String: String] == ["since": "Monday"])
     }
 
-    @Test func aFunctionCanBeAStep() async throws {
+    @Test func aFailedStepStopsThePipelineAndSaysWhere() async throws {
         let (summary, recorder) = await run("""
-        return await pipeline(
-          "fetch",
-          function onlyUnpaid(data) { return data.orders.filter((order) => !order.paid); },
-          async (orders) => { await sleep(1); return orders.map((order) => order.id); },
-        );
+        output.log("starting");
+        const fetched = await run("fetch", null, { show: true });
+        await run("broken", fetched, { show: true });
+        return await run("report", fetched, { show: true });
         """)
-        #expect(summary.error == nil)
-        #expect(try json(summary.resultJSON) as? [Int] == [2])
-        #expect(recorder.logs == ["Step 1 of 3: fetch", "Step 2 of 3: onlyUnpaid", "Step 3 of 3: a function"])
 
-        // A list works as well as separate arguments, and a step that returns nothing hands on null.
-        let listed = await run(#"return await pipeline(["fetch", () => {}, (data) => data === null]);"#)
-        #expect(try json(listed.summary.resultJSON) as? Bool == true)
-    }
-
-    @Test func aFailedStepStopsThePipelineAndSaysWhichOne() async throws {
-        let (summary, recorder) = await run(#"output.log("starting");\#nreturn await pipeline("fetch", "broken", "report");"#)
-
-        #expect(summary.error?.message == "Step 2 of 3, “broken”, failed: no data today")
-        // The place is where it really went wrong: in the step, not in the pipeline.
+        // The error is the step's own, at the place where it really went wrong.
+        #expect(summary.error?.message == "no data today")
         #expect(summary.error?.script == "broken")
         #expect(summary.error?.line == 2)
         #expect(recorder.runs.map(\.script) == ["flow", "fetch", "broken"])
-        #expect(recorder.logs == ["starting", "Step 1 of 3: fetch", "Step 2 of 3: broken", "about to fail"])
-
-        let glue = await run("return await pipeline('fetch',\n  () => { throw new Error('bad glue'); });")
-        #expect(glue.summary.error?.message == "Step 2 of 2, “a function”, failed: bad glue")
-        #expect(glue.summary.error?.script == "flow")
-        let unknown = await run(#"return await pipeline("fetch", "nowhere");"#)
-        #expect(unknown.summary.error?.message.hasPrefix("Step 2 of 2, “nowhere”, failed:") == true)
+        #expect(recorder.logs == ["starting", "about to fail"])
     }
 
-    @Test func refusesNonsense() async throws {
-        #expect(await run("await pipeline();").summary.error?.message.contains("needs at least one step") == true)
-        #expect(await run("await pipeline('fetch', 42);").summary.error?.message == "pipeline(): step 2 is neither a script's name nor a function.")
+    @Test func aPlainRunKeepsItsOutputsToItself() async throws {
+        for call in [#"run("fetch")"#, #"run("fetch", null, { show: false })"#, #"run("fetch", null, {})"#, #"run("fetch", null, { show: "yes" })"#] {
+            let (summary, recorder) = await run("const data = await \(call); output.json(data.orders.length);")
+            #expect(summary.error == nil)
+            // Only what the calling script published is shown; `run()` is a function call.
+            #expect(recorder.outputs.count == 1)
+            #expect(try json(recorder.outputs[0].json) as? Int == 3)
+        }
     }
 
-    @Test func aPlainRunStillKeepsItsOutputsToItself() async throws {
-        let (summary, recorder) = await run(#"const data = await run("fetch"); output.json(data.orders.length);"#)
+    @Test func onlyAScriptOnShowCanPutAnotherOnShow() async throws {
+        // "flow" runs "quiet" without showing it, so what "quiet" puts on
+        // show stays out of sight too.
+        let (engine, _) = makeEngine(Self.steps.merging([
+            "flow": #"output.json(await run("quiet"));"#,
+            "quiet": #"const fetched = await run("fetch", null, { show: true }); output.json(fetched.orders.length);"#,
+        ]) { $1 })
+        let recorder = Recorder()
+        let summary = await engine.run("flow", events: recorder.record)
         #expect(summary.error == nil)
-        // Only what the calling script published is shown; `run()` is a function call.
+        #expect(recorder.runs.map(\.script) == ["flow", "quiet", "fetch"])
         #expect(recorder.outputs.count == 1)
         #expect(try json(recorder.outputs[0].json) as? Int == 3)
     }
 
-    @Test func writesAPipelineScript() throws {
+    @Test func thereIsNoSeparatePipelineFunction() async throws {
+        let (summary, _) = await run(#"return typeof pipeline;"#)
+        #expect(try json(summary.resultJSON) as? String == "undefined")
+    }
+
+    @Test func writesAPipelineScriptThatRuns() async throws {
         let source = ScriptStore.pipeline(name: "Weekly report", steps: ["Fetch orders", "Clean \"all\" orders", "reports/build"])
         #expect(source == """
         // @name Weekly report
         // @description Runs Fetch orders, Clean "all" orders, then reports/build; each step gets the result of the one before
 
-        return await pipeline(
-          "Fetch orders",
-          "Clean \\"all\\" orders",
-          "reports/build",
-        );
+        // { show: true } puts what a step publishes on show here,
+        // as if you had run that step yourself.
+        let data = input.data;
+        data = await run("Fetch orders", data, { show: true });
+        data = await run("Clean \\"all\\" orders", data, { show: true });
+        data = await run("reports/build", data, { show: true });
+        return data;
 
         """)
         #expect(ScriptCompiler.syntaxProblem(in: source) == nil)
         #expect(ScriptHeader.parse(source)["name"] == "Weekly report")
         #expect(Reindenter.reindent(source) == source)
+        #expect(ScriptFootprint(of: source).items == [.runs("Fetch orders"), .runs("Clean \\\"all\\\" orders"), .runs("reports/build")])
 
         let store = ScriptStore(directory: FileManager.default.temporaryDirectory.appending(path: "rhino-store-\(UUID().uuidString)"))
         let made = try store.create(named: "Weekly report", in: "flows", source: source)
         #expect(made.id == "flows/weekly-report")
         #expect(try store.source(of: made.id) == source)
+
+        // What the sheet writes does what the sheet says.
+        let (summary, recorder) = await run(ScriptStore.pipeline(name: "Flow", steps: ["fetch", "clean", "report"]))
+        #expect(summary.error == nil)
+        #expect(try json(summary.resultJSON) as? [String: Int] == ["count": 2])
+        #expect(recorder.savedFiles.map(\.name) == ["Report"])
     }
 }

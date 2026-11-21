@@ -648,26 +648,20 @@ declare function shell(
  * alone works while no other script shares it. `data` shows
  * up in that script as `input.data`; it also sees the same dropped files.
  * If the other script fails, this call throws.
+ *
+ * What the other script publishes (tables, charts, files) stays with it,
+ * like a function's local work. Pass `{ show: true }` to put it on show in
+ * this run, as if the user had run that script themselves. That makes a
+ * pipeline: scripts one after another, each handed the result of the one
+ * before, with every step's output on screen:
+ *
+ *   const orders = await run("Fetch orders", input.data, { show: true });
+ *   const paid = orders.filter((order) => order.paid);
+ *   return await run("Build report", paid, { show: true });
+ *
+ * To hand a file to the next script, put its path in the result.
  */
-declare function run(name: string, data?: any): Promise<any>;
-
-/**
- * Run scripts one after another, each handed the result of the one before
- * as its `input.data`. The first gets what this script was handed, and the
- * last one's result is returned, so a pipeline is a script of one line:
- *
- *   return await pipeline("Fetch orders", "Clean orders", "Build report");
- *
- * A function in the list is a step too, for a little glue in between:
- *
- *   return await pipeline("Fetch orders", (orders) => orders.filter((o) => o.paid), "Build report");
- *
- * What the steps publish (tables, charts, files) is shown as if you had run
- * them yourself, and the log says which step is running. If a step fails,
- * the pipeline stops and the error says which one. Steps are named as for
- * `run()`. To hand a file to the next step, put its path in the result.
- */
-declare function pipeline(...steps: (string | ((data: any) => any))[]): Promise<any>;
+declare function run(name: string, data?: any, options?: { show?: boolean }): Promise<any>;
 
 declare function sleep(ms: number): Promise<void>;
 

@@ -63,7 +63,7 @@ import Testing
         await shell(`rm -rf ${folder}`);
         await http.request("DELETE", url);
         const text = await read("~/notes.txt");
-        return await pipeline("Fetch orders", clean, "Build report");
+        return await run("Build report", await run("Fetch orders"), { show: true });
         """)
         #expect(footprint.items == [
             .anyHost, .writesAnywhere, .anyCommand, .sends, .reads, .runs("Fetch orders"), .runs("Build report"),

@@ -57,7 +57,8 @@ actor Execution {
     var secretPermissions: [UUID: SecretRequest] = [:]
     /// The secrets this run has handled, kept out of what it records.
     var masker = SecretMasker()
-    /// Chained runs whose published values are shown: the steps of a pipeline.
+    /// Chained runs whose published values are shown: those started with
+    /// `run(name, data, { show: true })`.
     var publishingRuns: Set<String> = []
     /// Questions asked with type "secret": their answers are secrets too.
     var secretQuestions: Set<UUID> = []
@@ -318,7 +319,11 @@ actor Execution {
     func beginRun(name: String, parentID: String?, publishes: Bool) -> String {
         let id = UUID().uuidString
         if parentID == nil { rootID = id }
-        if publishes { publishingRuns.insert(id) }
+        // Only a script that is on show itself can put another on show: one
+        // run quietly by another does not get to fill the user's screen.
+        if publishes, let parentID, parentID == rootID || publishingRuns.contains(parentID) {
+            publishingRuns.insert(id)
+        }
         let script = provider.script(named: name)?.id ?? name
         scriptOfRun[id] = script
         emit(.runStarted(RunInfo(id: id, script: script, parentID: parentID, startedAt: Date())))

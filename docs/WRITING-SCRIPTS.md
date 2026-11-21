@@ -307,13 +307,15 @@ function longDate(date) {
 
 What a file declares at the start of a line (`function`, `const`, `class`) can be used in any script by name, like `get` or `output`. A shared function can use the built-in API, and what it logs or fetches counts as the calling script's doing. A name can be defined only once, and not one the API already has.
 
-`pipeline()` runs scripts one after another, each handed the result of the one before as its `input.data`:
+What a script started with `run()` publishes (tables, charts, files) stays with it, like a function's local work. Pass `{ show: true }` to put it on show in the calling run. Scripts run one after another this way, each handed the result of the one before as its `input.data`, make a pipeline:
 
 ```js
-return await pipeline("Fetch orders", "Clean orders", "Build report");
+const orders = await run("Fetch orders", input.data, { show: true });
+const clean = await run("Clean orders", orders, { show: true });
+return await run("Build report", clean, { show: true });
 ```
 
-A pipeline is itself a script, so it can have a schedule, a watched folder and a key. A function in the list is a step too, for glue between two scripts. What the steps publish is shown as if you had run them, and a failed step stops the pipeline and names itself in the error. File → New Pipeline… writes this script for you from a list of steps.
+A pipeline is an ordinary script, so it can have a schedule, a watched folder and a key, and anything can go between two steps: a filter, an `if`, a loop, two scripts at once with `Promise.all`. A step that fails stops it, and the error names that script and the line. Only a script that is on show itself can put another on show. File → New Pipeline… writes such a script for you from a list of steps.
 
 `input.from()` reads what another script produced the last time it ran successfully, without running it again:
 
@@ -396,5 +398,5 @@ Rhino writes a set of example scripts into the scripts folder on first launch. E
 | Mac status | `shell()`: disk space, battery and uptime. |
 | AI / Sort feedback | `ai.ask()` with `returns`, so the answer comes back as data. |
 | AI / Summarise stories | `input.from()` to build on another script's last result, then `ai.ask()`. |
-| Pipelines / News digest | `pipeline()`: fetch the front page, then summarise it. |
+| Pipelines / News digest | `run()` twice in a row with `{ show: true }`: fetch the front page, then summarise it. |
 | Pipelines / Compare repositories | `run()` with data, twice in parallel, and a CSV file. |
