@@ -1,0 +1,22 @@
+[
+  { "name": "bug", "color": "d73a4a", "description": "Something doesn't work as documented" },
+  { "name": "feature", "color": "a2eeef", "description": "A new capability, or more of an existing one" },
+  { "name": "docs", "color": "0075ca", "description": "The README, the guides or the API reference" },
+  { "name": "question", "color": "d876e3", "description": "How something works, or how to do it" },
+  { "name": "security", "color": "b60205", "description": "Hardening that is safe to discuss in the open. Report a vulnerability privately" },
+  { "name": "good first issue", "color": "7057ff", "description": "Small, well described, and a way into the code" },
+  { "name": "help wanted", "color": "008672", "description": "The maintainers would welcome a pull request" },
+  { "name": "needs triage", "color": "fbca04", "description": "New, and not yet looked at" },
+  { "name": "needs repro", "color": "fbca04", "description": "Can't be acted on until it can be reproduced" },
+  { "name": "blocked", "color": "000000", "description": "Waits on something outside this issue" },
+  { "name": "breaking", "color": "b60205", "description": "Changes the script API or stored data in a way scripts or users must follow" },
+  { "name": "dependencies", "color": "0366d6", "description": "Updates a dependency" },
+  { "name": "duplicate", "color": "cfd3d7", "description": "Already tracked elsewhere" },
+  { "name": "wontfix", "color": "ffffff", "description": "Decided against, with the reason in the issue" },
+  { "name": "area: script api", "color": "c5def5", "description": "The globals scripts use, and the engine that runs them" },
+  { "name": "area: ai", "color": "c5def5", "description": "The AI writer, ai.ask() and providers" },
+  { "name": "area: triggers", "color": "c5def5", "description": "Schedules, watched folders and Shortcuts" },
+  { "name": "area: app", "color": "c5def5", "description": "The window: editor, logs, output, history and Settings" },
+  { "name": "area: examples", "color": "c5def5", "description": "The example scripts" },
+  { "name": "area: build", "color": "c5def5", "description": "Building, signing and installing" }
+]

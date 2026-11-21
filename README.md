@@ -173,4 +173,6 @@ Rhino is early software, version 0.1.0. The script API and the layout of stored 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the code is organised and how a run works
 - [CONTRIBUTING.md](CONTRIBUTING.md): setup, conventions, and how to add to the script API
 - [SECURITY.md](SECURITY.md): the trust model, and how to report a problem
+- [CHANGELOG.md](CHANGELOG.md): what changed in each release
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md): how we treat each other here
 - [LICENSE](LICENSE): MIT

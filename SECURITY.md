@@ -2,9 +2,9 @@
 
 ## Reporting a problem
 
-Report privately through the repository's security advisories.
+Please do not open a public issue for a security problem. Report it privately: on the repository's **Security** tab, choose **Report a vulnerability**. That opens a private advisory only the maintainers can read.
 
-Please do not open a public issue for a security problem. Say what you found, how to reproduce it, and which version or commit you used.
+Say what you found, how to reproduce it, and which version or commit you used.
 
 Worth reporting:
 

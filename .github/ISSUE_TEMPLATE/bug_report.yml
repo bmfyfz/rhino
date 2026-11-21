@@ -1,0 +1,58 @@
+name: Bug report
+description: Something doesn't work the way the README or the guides say it does
+labels: [bug, needs triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. If this is a way for a key or a secret to leak, or for a script to run when nothing asked for it, **don't file it here**: report it privately under the repository's Security tab.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: >-
+        What you did, what Rhino did, and what you expected instead. For a script that fails, paste
+        the error from the Logs tab as text.
+      placeholder: |
+        Ran "Site check" from a schedule. The run failed with:
+        Error: …
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The shortest sequence that shows it. If a script is involved, the smallest script that still fails.
+      placeholder: |
+        1. New Script
+        2. Paste: output.table([{ a: 1 }]).name("T");
+        3. Run
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where you saw it
+      multiple: true
+      options:
+        - Running a script (the script API)
+        - The AI writer or ai.ask()
+        - Schedules, watched folders or Shortcuts
+        - The window (editor, logs, output, history)
+        - Settings (AI providers, secrets, functions)
+        - Building or installing
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Rhino's version or the commit (`git rev-parse --short HEAD`), and your macOS and Xcode versions.
+      placeholder: "0.1.0, or a1b2c3d · macOS 27.3 · Xcode 27.2"
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: A screenshot, the AI provider and model in use. Take keys and tokens out first.
