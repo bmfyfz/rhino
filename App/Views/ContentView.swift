@@ -539,7 +539,11 @@ struct CodeEditor: NSViewRepresentable {
         textView.isContinuousSpellCheckingEnabled = false
         textView.isGrammarCheckingEnabled = false
         textView.smartInsertDeleteEnabled = false
-        textView.textContainerInset = NSSize(width: 8, height: 10)
+        // The numbers in the gutter sit close, so the code needs less room on its left.
+        textView.textContainerInset = NSSize(width: 4, height: 10)
+        // The gutter reads where each line is from the classic layout
+        // manager; asking for it once makes the text view use it throughout.
+        _ = textView.layoutManager
 
         textView.minSize = .zero
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
@@ -556,6 +560,10 @@ struct CodeEditor: NSViewRepresentable {
         scrollView.drawsBackground = false
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.contentInsets.bottom = bottomInset
+
+        scrollView.verticalRulerView = LineNumberRuler(textView: textView, scrollView: scrollView)
+        scrollView.hasVerticalRuler = true
+        scrollView.rulersVisible = true
         return scrollView
     }
 
@@ -572,6 +580,7 @@ struct CodeEditor: NSViewRepresentable {
             textView.string = text
             SyntaxTheme.apply(to: textView)
             textView.undoManager?.removeAllActions()
+            (scrollView.verticalRulerView as? LineNumberRuler)?.textChanged()
             if isBeingWritten {
                 textView.scrollToEndOfDocument(nil)
             } else {
