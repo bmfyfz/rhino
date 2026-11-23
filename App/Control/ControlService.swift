@@ -135,28 +135,53 @@ final class ControlService {
     /// person pressed Control-C), the run is stopped.
     private func run(_ script: Script, data: String?, files: [String], on connection: ControlConnection) async throws -> RunReport {
         var scripts: [String: String] = [:]
-        var seen: Set<UUID> = []
+        // A file or a published value is announced once. The script names
+        // it a moment after making it, so the line waits for the next event
+        // and goes out with the name.
+        var held: (id: UUID, item: RunRecord.Item)?
+        var announced: Set<UUID> = []
+        func sendHeld() {
+            guard let waiting = held else { return }
+            held = nil
+            connection.send(.line(Self.line(waiting.item, scripts: scripts)))
+        }
+        func announce(_ id: UUID, _ item: RunRecord.Item) {
+            if held?.id == id {
+                held = (id, item)
+            } else if announced.insert(id).inserted {
+                sendHeld()
+                held = (id, item)
+            }
+        }
         let model = model
         let work = Task {
-            try await model.runFromCommandLine(
+            let record = try await model.runFromCommandLine(
                 script, data: data, files: files.map { URL(fileURLWithPath: $0) },
                 waiting: { connection.send(.waiting($0)) },
                 events: { event in
-                    // A file or a published value is announced once, when it
-                    // first appears; it is sent again when the script names it.
-                    let item: RunRecord.Item? = switch event {
+                    switch event {
                     case .runStarted(let run):
-                        { scripts[run.id] = run.script; return nil }()
-                    case .log(let entry): .log(entry)
-                    case .spanFinished(let span): .call(span)
-                    case .file(let file): seen.insert(file.id).inserted ? .file(file) : nil
-                    case .output(let output): seen.insert(output.id).inserted ? .output(output) : nil
-                    case .notification(let notification): .notification(notification)
-                    case .runFinished, .spanStarted, .prompt, .promptResolved: nil
+                        scripts[run.id] = run.script
+                    case .file(let file):
+                        announce(file.id, .file(file))
+                    case .output(let output):
+                        announce(output.id, .output(output))
+                    case .log(let entry):
+                        sendHeld()
+                        connection.send(.line(Self.line(.log(entry), scripts: scripts)))
+                    case .spanFinished(let span):
+                        sendHeld()
+                        connection.send(.line(Self.line(.call(span), scripts: scripts)))
+                    case .notification(let notification):
+                        sendHeld()
+                        connection.send(.line(Self.line(.notification(notification), scripts: scripts)))
+                    case .runFinished, .spanStarted, .prompt, .promptResolved:
+                        break
                     }
-                    if let item { connection.send(.line(Self.line(item, scripts: scripts))) }
                 }
             )
+            sendHeld()
+            return record
         }
         connection.whenClosed { work.cancel() }
         return Self.report(try await work.value)
@@ -177,7 +202,7 @@ final class ControlService {
             path: script.url.path(percentEncoded: false),
             running: model.runningSession(of: script.id) != nil,
             nextRun: model.schedulesPaused ? nil : model.schedules[script.id]?.next,
-            lastRun: latest.map { brief($0, of: script.id) },
+            lastRun: latest.map { detailed($0, of: script.id) },
             needsApproval: !model.unapproved(script.id).isEmpty
         )
     }
@@ -191,19 +216,25 @@ final class ControlService {
         return RunBrief(id: listing.id.uuidString, script: script, startedAt: listing.startedAt, status: status)
     }
 
+    /// A run with what its record knows: how long it took, what started
+    /// it, and whether it failed or was stopped. The script is named by the
+    /// id it has today; the record keeps the one it had when it ran.
+    private func detailed(_ listing: RunListing, of script: String) -> RunBrief {
+        guard listing.outcome != .running, let record = model.record(of: listing.id) else {
+            return brief(listing, of: script)
+        }
+        var run = Self.brief(record)
+        run.script = script
+        return run
+    }
+
     private func runs(of script: String?, limit: Int) -> [RunBrief] {
-        let listings = model.history
+        model.history
             .filter { script == nil || $0.key == script }
             .flatMap { id, runs in runs.map { (script: id, listing: $0) } }
             .sorted { $0.listing.startedAt > $1.listing.startedAt }
             .prefix(max(1, min(limit, 200)))
-        return listings.map { entry in
-            // A finished run's record says how long it took and what started it.
-            guard entry.listing.outcome != .running, let record = model.record(of: entry.listing.id) else {
-                return brief(entry.listing, of: entry.script)
-            }
-            return Self.brief(record)
-        }
+            .map { detailed($0.listing, of: $0.script) }
     }
 
     private func log(run: String?, script name: String?) throws -> RunReport {
@@ -211,13 +242,14 @@ final class ControlService {
             guard let id = UUID(uuidString: run), let record = model.record(of: id) else {
                 throw AppModel.Problem("There is no finished run with the id \(run). `rhino runs` lists them.")
             }
-            return Self.report(record)
+            let script = model.history.first { $0.value.contains { $0.id == id } }?.key
+            return Self.report(record, script: script)
         }
         let script = try model.script(called: name ?? "")
         guard let latest = model.history[script.id]?.first(where: { $0.outcome != .running }), let record = model.record(of: latest.id) else {
             throw AppModel.Problem("“\(script.name)” has no finished run yet.")
         }
-        return Self.report(record)
+        return Self.report(record, script: script.id)
     }
 
     private func check(_ source: String, unapproved: [ScriptFootprint.Item]) -> CheckReport {
@@ -267,7 +299,7 @@ final class ControlService {
 
     /// A finished run as the tool prints it: every item once, as it was at
     /// the end, in the order it first appeared.
-    private static func report(_ record: RunRecord) -> RunReport {
+    private static func report(_ record: RunRecord, script: String? = nil) -> RunReport {
         let scripts = Dictionary(record.runs.map { ($0.id, $0.script) }, uniquingKeysWith: { first, _ in first })
         var latest: [UUID: RunRecord.Item] = [:]
         var order: [UUID] = []
@@ -298,8 +330,10 @@ final class ControlService {
         let failure = record.summary.error.map {
             RunReport.Failure(name: $0.name, message: $0.message, script: $0.script, line: $0.line)
         }
+        var run = brief(record)
+        if let script { run.script = script }
         return RunReport(
-            run: brief(record),
+            run: run,
             result: record.summary.resultJSON.flatMap(JSONValue.init(json:)),
             error: failure,
             outputs: outputs,

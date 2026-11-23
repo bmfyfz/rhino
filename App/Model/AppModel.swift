@@ -751,6 +751,12 @@ final class AppModel {
         approvals[id] = footprint.keys
         writtenFromOutside.remove(id)
         saidHeld.remove(id)
+        // The same question may be waiting a second time, from a tool that
+        // asked again. It has its answer now.
+        let answered = approvalQueue.map(\.approval).filter { waiting in
+            waiting.script.id == id && waiting.additions.allSatisfy { footprint.keys.contains($0.key) }
+        }
+        for approval in answered { settleApproval(approval.id, true) }
     }
 
     /// Whether a script has to wait for the person before it may start by itself.
@@ -1139,6 +1145,12 @@ final class AppModel {
         let id = script.id
         if let mistake = ScriptCompiler.syntaxProblem(in: source) {
             throw Problem("Not saved, because it is not valid JavaScript: \(mistake)")
+        }
+        // New source that does not say what the script is called must not
+        // take its name away: the next command would no longer find it.
+        var source = source
+        if ScriptHeader.parse(source)["name"] == nil, script.name != id {
+            source = "// @name \(script.name)\n" + source
         }
         if selectedID == id {
             switch aiActivity {
