@@ -11,7 +11,20 @@ import Testing
         "/tmp/rhino-test-\(UUID().uuidString.prefix(8)).sock"
     }
 
-    @Test func aRequestIsAnsweredWithItsResult() throws {
+    /// The tool's end waits for its answer the plain way, by blocking. A
+    /// test must not do that on the threads Swift runs tests and tasks on:
+    /// on a machine with few cores every one of them would be waiting for
+    /// an answer that needs one of them to be given. So the tool's part of
+    /// each test runs on a thread of its own, as the real tool does.
+    static func asTheTool<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            Thread.detachNewThread {
+                continuation.resume(with: Result { try work() })
+            }
+        }
+    }
+
+    @Test func aRequestIsAnsweredWithItsResult() async throws {
         let path = Self.socketPath()
         let listener = try ControlListener(path: path) { request, connection in
             guard case .show(let script) = request else { return connection.send(.failed("unexpected")) }
@@ -19,14 +32,14 @@ import Testing
         }
         defer { listener.stop() }
 
-        let result = try ControlClient(path: path).perform(.show(script: "site-check"))
+        let result = try await Self.asTheTool { try ControlClient(path: path).perform(.show(script: "site-check")) }
         #expect(result == .script(ScriptInfo(id: "site-check", name: "Site check"), source: "output.log('hi');\n"))
         // Only the user can open the socket.
         let permissions = try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int
         #expect(permissions == 0o600)
     }
 
-    @Test func messagesArriveInOrderBeforeTheResult() throws {
+    @Test func messagesArriveInOrderBeforeTheResult() async throws {
         let path = Self.socketPath()
         let started = Date(timeIntervalSince1970: 1_800_000_000.123)
         let listener = try ControlListener(path: path) { _, connection in
@@ -39,8 +52,11 @@ import Testing
         }
         defer { listener.stop() }
 
-        var received: [ControlMessage] = []
-        let result = try ControlClient(path: path).perform(.run(script: "s", data: #"{"a":1}"#, files: ["/tmp/in.csv"])) { received.append($0) }
+        let (result, received) = try await Self.asTheTool {
+            var received: [ControlMessage] = []
+            let result = try ControlClient(path: path).perform(.run(script: "s", data: #"{"a":1}"#, files: ["/tmp/in.csv"])) { received.append($0) }
+            return (result, received)
+        }
         #expect(received.count == 4)
         #expect(received.first == .waiting("Waiting for you to approve it in Rhino"))
         #expect(received.last == .line(RunLine(time: started, script: "s", kind: .log, text: "line 3", level: "info")))
@@ -49,23 +65,23 @@ import Testing
         #expect(report.result == .object(["count": .integer(3), "ok": .bool(true)]))
     }
 
-    @Test func aRefusalIsAnErrorWithTheAppsWords() throws {
+    @Test func aRefusalIsAnErrorWithTheAppsWords() async throws {
         let path = Self.socketPath()
         let listener = try ControlListener(path: path) { _, connection in
             connection.send(.failed("No script is called “nope”."))
         }
         defer { listener.stop() }
 
-        #expect(throws: ControlClient.Refusal(message: "No script is called “nope”.")) {
-            try ControlClient(path: path).perform(.show(script: "nope"))
+        await #expect(throws: ControlClient.Refusal(message: "No script is called “nope”.")) {
+            try await Self.asTheTool { try ControlClient(path: path).perform(.show(script: "nope")) }
         }
     }
 
-    @Test func nobodyListeningIsToldApart() throws {
+    @Test func nobodyListeningIsToldApart() async throws {
         let path = Self.socketPath()
         #expect(!ControlClient(path: path).isAnswered)
-        #expect(throws: ControlClient.Unreachable.self) {
-            try ControlClient(path: path).perform(.status)
+        await #expect(throws: ControlClient.Unreachable.self) {
+            try await Self.asTheTool { try ControlClient(path: path).perform(.status) }
         }
 
         // After the app stops listening the socket is gone again.
@@ -76,14 +92,14 @@ import Testing
         #expect(!ControlClient(path: path).isAnswered)
     }
 
-    @Test func aSecondAppDoesNotTakeTheSocket() throws {
+    @Test func aSecondAppDoesNotTakeTheSocket() async throws {
         let path = Self.socketPath()
         let first = try ControlListener(path: path) { _, connection in connection.send(.done(.ok("first"))) }
         defer { first.stop() }
         #expect(throws: ControlError.self) {
             _ = try ControlListener(path: path) { _, connection in connection.send(.done(.ok("second"))) }
         }
-        #expect(try ControlClient(path: path).perform(.status) == .ok("first"))
+        #expect(try await Self.asTheTool { try ControlClient(path: path).perform(.status) } == .ok("first"))
     }
 
     @Test func theAppLearnsWhenTheToolGoesAway() async throws {
@@ -107,17 +123,19 @@ import Testing
         await iterator.next()
     }
 
-    @Test func anotherVersionOfTheProtocolIsTurnedAway() throws {
+    @Test func anotherVersionOfTheProtocolIsTurnedAway() async throws {
         let path = Self.socketPath()
         let listener = try ControlListener(path: path) { _, connection in connection.send(.done(.ok(""))) }
         defer { listener.stop() }
 
-        let descriptor = try Plumbing.socket()
-        defer { close(descriptor) }
-        #expect(try Plumbing.withAddress(path) { Darwin.connect(descriptor, $0, $1) } == 0)
-        #expect(Plumbing.write(try Wire.line(ControlEnvelope(.status, version: 99)), to: descriptor))
-        var reader = LineReader(descriptor: descriptor)
-        let answer = reader.next()
+        let answer = try await Self.asTheTool { () -> Data? in
+            let descriptor = try Plumbing.socket()
+            defer { close(descriptor) }
+            guard try Plumbing.withAddress(path, { Darwin.connect(descriptor, $0, $1) }) == 0,
+                  Plumbing.write(try Wire.line(ControlEnvelope(.status, version: 99)), to: descriptor) else { return nil }
+            var reader = LineReader(descriptor: descriptor)
+            return reader.next()
+        }
         let line = try #require(answer)
         guard case .failed(let message) = try Wire.decode(ControlMessage.self, from: line) else { Issue.record("not refused"); return }
         #expect(message.contains("different versions"))

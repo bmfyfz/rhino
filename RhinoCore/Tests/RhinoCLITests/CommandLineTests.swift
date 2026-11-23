@@ -46,11 +46,23 @@ import RhinoControl
             listener.stop()
         }
 
-        func rhino(_ arguments: String..., input: String? = nil) throws -> Outcome {
+        /// Runs the tool and waits for it, on a thread of its own: waiting
+        /// on the threads tests and tasks share would leave none for the
+        /// stand-in app to answer on, on a machine with few cores.
+        func rhino(_ arguments: String..., input: String? = nil, environment: [String: String]? = nil) async throws -> Outcome {
+            let path = path
+            return try await withCheckedThrowingContinuation { continuation in
+                Thread.detachNewThread {
+                    continuation.resume(with: Result { try Self.run(arguments, input: input, environment: environment ?? ["RHINO_SOCKET": path, "TZ": "UTC"]) })
+                }
+            }
+        }
+
+        private static func run(_ arguments: [String], input: String?, environment: [String: String]) throws -> Outcome {
             let process = Process()
             process.executableURL = CommandLineTests.tool
             process.arguments = arguments
-            process.environment = ["RHINO_SOCKET": path, "TZ": "UTC"]
+            process.environment = environment
             let (out, error, stdin) = (Pipe(), Pipe(), Pipe())
             process.standardOutput = out
             process.standardError = error
@@ -75,14 +87,14 @@ import RhinoControl
         )
     }
 
-    @Test func listsScriptsAsATableOrAsData() throws {
+    @Test func listsScriptsAsATableOrAsData() async throws {
         let app = try App { _, connection in
             connection.send(.done(.scripts([
                 ScriptInfo(id: "site-check", name: "Site check", schedule: "every 15 minutes", lastRun: RunBrief(id: "r", script: "site-check", startedAt: Self.started, status: .finished)),
                 ScriptInfo(id: "AI/sort-feedback", name: "Sort feedback", needsApproval: true),
             ])))
         }
-        let listed = try app.rhino("list")
+        let listed = try await app.rhino("list")
         #expect(listed.status == 0)
         #expect(listed.out == """
         NAME           ID                RUNS              LAST RUN                   STATE
@@ -93,14 +105,14 @@ import RhinoControl
         #expect(listed.error.isEmpty)
 
         // `ls` is the same command, and --json gives the answer itself.
-        let data = try app.rhino("ls", "--json")
+        let data = try await app.rhino("ls", "--json")
         let scripts = try JSONSerialization.jsonObject(with: Data(data.out.utf8)) as? [[String: Any]]
         #expect(scripts?.map { $0["id"] as? String } == ["site-check", "AI/sort-feedback"])
         #expect((scripts?.first?["lastRun"] as? [String: Any])?["startedAt"] as? String == "2027-01-15T08:00:00Z")
         #expect(app.asked.all == [.list, .list])
     }
 
-    @Test func aRunPrintsItsResultOnOutputAndItsLogOnError() throws {
+    @Test func aRunPrintsItsResultOnOutputAndItsLogOnError() async throws {
         let app = try App { _, connection in
             connection.send(.waiting("Waiting for you to approve “Site check” in Rhino…"))
             connection.send(.line(RunLine(time: Self.started, script: "site-check", kind: .log, text: "Checking 3 sites", level: "info")))
@@ -108,7 +120,7 @@ import RhinoControl
             connection.send(.line(RunLine(time: Self.started, script: "site-check", kind: .file, text: "Report  /tmp/report.csv")))
             connection.send(.done(.run(Self.report(.finished))))
         }
-        let ran = try app.rhino("run", "Site check", "--data", #"{"only":"a"}"#, "--file", "/etc/hosts")
+        let ran = try await app.rhino("run", "Site check", "--data", #"{"only":"a"}"#, "--file", "/etc/hosts")
         #expect(ran.status == 0)
         // Only what the script returned is on standard output, so it can be piped on.
         #expect(try JSONSerialization.jsonObject(with: Data(ran.out.utf8)) as? NSDictionary == ["up": 3, "sites": ["a", "b"]])
@@ -123,54 +135,47 @@ import RhinoControl
         #expect(app.asked.all == [.run(script: "Site check", data: #"{"only":"a"}"#, files: ["/etc/hosts"])])
 
         // --quiet leaves only the result; --json gives the whole run and nothing else.
-        let quiet = try app.rhino("run", "Site check", "-q")
+        let quiet = try await app.rhino("run", "Site check", "-q")
         #expect(quiet.error == "Waiting for you to approve “Site check” in Rhino…\n")
-        let whole = try app.rhino("run", "Site check", "--json")
+        let whole = try await app.rhino("run", "Site check", "--json")
         #expect(whole.error.isEmpty)
         let run = try JSONSerialization.jsonObject(with: Data(whole.out.utf8)) as? [String: Any]
         #expect((run?["run"] as? [String: Any])?["status"] as? String == "finished")
         #expect((run?["files"] as? [[String: Any]])?.first?["path"] as? String == "/tmp/report.csv")
     }
 
-    @Test func aFailedRunSaysWhyAndExitsWithOne() throws {
+    @Test func aFailedRunSaysWhyAndExitsWithOne() async throws {
         let failure = RunReport.Failure(name: "Error", message: "no data today", script: "site-check", line: 3)
         let app = try App { _, connection in connection.send(.done(.run(Self.report(.failed, error: failure)))) }
 
-        let ran = try app.rhino("run", "site-check")
+        let ran = try await app.rhino("run", "site-check")
         #expect(ran.status == 1)
         #expect(ran.out.isEmpty)
         #expect(ran.error == "Failed in 1.2 s: Error: no data today (site-check.js, line 3)\n")
         // Quiet still says why it failed.
-        #expect(try app.rhino("run", "site-check", "--quiet").error.contains("no data today"))
+        #expect(try await app.rhino("run", "site-check", "--quiet").error.contains("no data today"))
         // As data, the failure is in the document, and the exit code still says it failed.
-        let whole = try app.rhino("run", "site-check", "--json")
+        let whole = try await app.rhino("run", "site-check", "--json")
         #expect(whole.status == 1)
         #expect(whole.out.contains(#""message" : "no data today""#))
     }
 
-    @Test func whatTheAppRefusesIsSaidPlainly() throws {
+    @Test func whatTheAppRefusesIsSaidPlainly() async throws {
         let app = try App { _, connection in connection.send(.failed("No script is called “nope”. `rhino list` shows them.")) }
-        let shown = try app.rhino("show", "nope")
+        let shown = try await app.rhino("show", "nope")
         #expect(shown.status == 1)
         #expect(shown.out.isEmpty)
         #expect(shown.error == "rhino: No script is called “nope”. `rhino list` shows them.\n")
     }
 
-    @Test func nothingListeningExitsWithTwo() throws {
+    @Test func nothingListeningExitsWithTwo() async throws {
         let app = try App { _, connection in connection.send(.done(.ok(""))) }
-        let process = Process()
-        process.executableURL = Self.tool
-        process.arguments = ["status"]
-        process.environment = ["RHINO_SOCKET": app.path + ".gone"]
-        let error = Pipe()
-        process.standardError = error
-        try process.run()
-        process.waitUntilExit()
-        #expect(process.terminationStatus == 2)
-        #expect(String(decoding: error.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).hasPrefix("rhino: Nothing is answering"))
+        let asked = try await app.rhino("status", environment: ["RHINO_SOCKET": app.path + ".gone"])
+        #expect(asked.status == 2)
+        #expect(asked.error.hasPrefix("rhino: Nothing is answering"))
     }
 
-    @Test func sourceComesFromAFileOrFromAPipe() throws {
+    @Test func sourceComesFromAFileOrFromAPipe() async throws {
         let app = try App { request, connection in
             switch request {
             case .write(let script, _): connection.send(.done(.script(ScriptInfo(id: script, name: "X"), source: "")))
@@ -183,11 +188,11 @@ import RhinoControl
         try "output.log('from a file');\n".write(to: file, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: file) }
 
-        #expect(try app.rhino("write", "site-check", input: "output.log('piped');\n").out == "Saved site-check\n")
-        #expect(try app.rhino("write", "site-check", file.path(percentEncoded: false)).status == 0)
-        #expect(try app.rhino("new", "Monthly", "--folder", "reports", "-", input: "1;").out == "Created reports/monthly\n")
+        #expect(try await app.rhino("write", "site-check", input: "output.log('piped');\n").out == "Saved site-check\n")
+        #expect(try await app.rhino("write", "site-check", file.path(percentEncoded: false)).status == 0)
+        #expect(try await app.rhino("new", "Monthly", "--folder", "reports", "-", input: "1;").out == "Created reports/monthly\n")
         // A check that finds a mistake prints it and exits with one.
-        let checked = try app.rhino("check", input: "}{")
+        let checked = try await app.rhino("check", input: "}{")
         #expect(checked.status == 1)
         #expect(checked.out == "Not valid JavaScript: Unexpected token '}' on line 2\n")
 
@@ -198,29 +203,29 @@ import RhinoControl
             .check(source: "}{", script: nil),
         ])
         // A file that is not there never reaches the app.
-        let missing = try app.rhino("write", "site-check", "/nowhere/at/all.js")
+        let missing = try await app.rhino("write", "site-check", "/nowhere/at/all.js")
         #expect(missing.status == 1)
         #expect(missing.error == "rhino: Could not read /nowhere/at/all.js.\n")
     }
 
-    @Test func aRunIdAndAScriptNameAreToldApart() throws {
+    @Test func aRunIdAndAScriptNameAreToldApart() async throws {
         let app = try App { _, connection in connection.send(.done(.run(Self.report(.finished)))) }
-        let logged = try app.rhino("log", "6F9619FF-8B86-D011-B42D-00C04FC964FF")
+        let logged = try await app.rhino("log", "6F9619FF-8B86-D011-B42D-00C04FC964FF")
         #expect(logged.out.hasPrefix("site-check · 2027-01-15 08:00 · started by command line · run 6F9619FF-8B86-D011-B42D-00C04FC964FF\n08:00:00  Checking 3 sites\nFinished in 1.2 s\n\n{"))
-        _ = try app.rhino("log", "Site check")
+        _ = try await app.rhino("log", "Site check")
         #expect(app.asked.all == [
             .log(run: "6F9619FF-8B86-D011-B42D-00C04FC964FF", script: nil),
             .log(run: nil, script: "Site check"),
         ])
     }
 
-    @Test func mistakesInTheCommandAreUsageErrors() throws {
+    @Test func mistakesInTheCommandAreUsageErrors() async throws {
         let app = try App { _, connection in connection.send(.done(.ok(""))) }
-        #expect(try app.rhino("run").status == 64)
-        #expect(try app.rhino("run", "x", "--data", "1", "--data-file", "f").status == 64)
-        #expect(try app.rhino("frobnicate").status == 64)
+        #expect(try await app.rhino("run").status == 64)
+        #expect(try await app.rhino("run", "x", "--data", "1", "--data-file", "f").status == 64)
+        #expect(try await app.rhino("frobnicate").status == 64)
         #expect(app.asked.all.isEmpty)
-        #expect(try app.rhino("--version").out == "\(ControlProtocol.toolVersion)\n")
+        #expect(try await app.rhino("--version").out == "\(ControlProtocol.toolVersion)\n")
     }
 
     @Test func textIsLaidOutPlainly() {
