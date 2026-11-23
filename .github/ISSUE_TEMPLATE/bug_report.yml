@@ -38,6 +38,7 @@ body:
         - Running a script (the script API)
         - The AI writer or ai.ask()
         - Schedules, watched folders or Shortcuts
+        - The rhino command line tool
         - The window (editor, logs, output, history)
         - Settings (AI providers, secrets, functions)
         - Building or installing

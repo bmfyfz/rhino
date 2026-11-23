@@ -15,6 +15,8 @@ public struct ScriptVersion: Identifiable, Codable, Hashable, Sendable {
         case undo
         /// An earlier version, from that date, was put back.
         case restore(Date)
+        /// Replaced from outside the app, with the `rhino` command line tool.
+        case commandLine
     }
 
     public let id: UUID

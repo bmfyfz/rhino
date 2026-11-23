@@ -58,6 +58,25 @@ public struct ScriptFootprint: Hashable, Sendable {
         }
 
         public static func < (left: Item, right: Item) -> Bool { left.key < right.key }
+
+        /// What it means, in words for the person who is asked to agree.
+        public var summary: String {
+            switch self {
+            case .host(let host): "Contact \(host)"
+            case .anyHost: "Contact an address it works out while running"
+            case .sends: "Send data out, not only fetch it"
+            case .writes(let path): "Write the file \(path)"
+            case .writesAnywhere: "Write a file in a place it works out while running"
+            case .reads: "Read files from your disk"
+            case .command(let command): "Run the command: \(command)"
+            case .anyCommand: "Run a command it puts together while running"
+            case .secret(let name): "Use your saved secret “\(name)”"
+            case .ai: "Send text to your AI provider"
+            case .notifies: "Show notifications"
+            case .runs(let name): "Run the script “\(name)”"
+            case .buildsCode: "Build code from text and run it, which hides what it does"
+            }
+        }
     }
 
     public let items: Set<Item>

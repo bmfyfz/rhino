@@ -74,6 +74,7 @@ Ways to run
 - `// @schedule weekdays at 09:00`: on a schedule, as a phrase or a cron expression.
 - `// @watch ~/Downloads/*.pdf`: when a file arrives in a folder.
 - The "Run Script" action in the Shortcuts app.
+- From a terminal, with the `rhino` command line tool.
 
 Scheduled and watching scripts only run while Rhino is open. Closing the window keeps it running, and a setting opens it at login.
 
@@ -89,6 +90,20 @@ Runs
 - Each run shows its log, its HTTP and AI calls, the questions it asked, and what it published.
 - The last 50 runs of each script are kept, with their logs and calls.
 - A scheduled or folder-triggered run that fails posts a notification that opens the run.
+
+## From a terminal
+
+Rhino comes with a command line tool, `rhino`, for you and for coding agents such as Claude Code or Codex:
+
+```sh
+rhino list
+rhino api > api.d.ts                 # what a script can use
+rhino new "Site check" draft.js
+rhino run "Site check" --data '{"only":"github.com"}' > result.json
+rhino log "Site check"
+```
+
+It talks to the running app, so its runs appear in the window and the same rules apply: a script run from a terminal asks for your approval in the app before its first run, and secrets cannot be read or allowed from the command line. Turn it on in Settings > General. [docs/CLI.md](docs/CLI.md) has every command.
 
 ## Example scripts
 
@@ -160,6 +175,7 @@ Everything is under `~/Library/Application Support/Rhino`:
 | `Versions/` | Earlier versions of each script, up to 100 per script. |
 | `History.store` | The database of finished runs. |
 | `SecretAccess.json` | Which scripts may use which saved secret. Names only, no values. |
+| `control.sock` | Where the app listens for the `rhino` tool while that is turned on. Only your account can open it. |
 
 API keys for AI providers and the secrets scripts ask for are in the Keychain, not in these folders. Which providers are set up, and the other settings, are in the app's preferences.
 
@@ -170,6 +186,7 @@ Rhino is early software, version 0.1.0. The script API and the layout of stored 
 ## More
 
 - [docs/WRITING-SCRIPTS.md](docs/WRITING-SCRIPTS.md): how to write scripts by hand
+- [docs/CLI.md](docs/CLI.md): the `rhino` command line tool
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the code is organised and how a run works
 - [CONTRIBUTING.md](CONTRIBUTING.md): setup, conventions, and how to add to the script API
 - [SECURITY.md](SECURITY.md): the trust model, and how to report a problem

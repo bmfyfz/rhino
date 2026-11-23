@@ -34,10 +34,15 @@ struct SettingsView: View {
 // MARK: - General
 
 private struct GeneralPane: View {
+    @Environment(AppModel.self) private var model
     @State private var opensAtLogin = SMAppService.mainApp.status == .enabled
     @State private var problem: String?
+    @State private var commandPath = CommandLineTool.installedAt
+    @State private var commandProblem: String?
 
     var body: some View {
+        @Bindable var model = model
+
         Form {
             Section {
                 Toggle("Open Rhino when you log in", isOn: Binding(get: { opensAtLogin }, set: setOpensAtLogin))
@@ -50,9 +55,45 @@ private struct GeneralPane: View {
                 Text("Scripts with a schedule only run while Rhino is open. Closing the window keeps it running; quitting stops them.")
                     .foregroundStyle(.secondary)
             }
+
+            Section {
+                Toggle("Allow the rhino command line tool", isOn: $model.allowsCommandLine)
+                if let problem = model.commandLineProblem {
+                    Text(problem).foregroundStyle(.red)
+                }
+                LabeledContent("Command") {
+                    Text(commandPath ?? "Not installed")
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Button(commandPath == nil ? "Install" : "Reinstall", action: installCommand)
+                        .controlSize(.small)
+                        .disabled(CommandLineTool.bundled == nil)
+                }
+                if let commandProblem {
+                    Text(commandProblem).foregroundStyle(.red)
+                } else if let commandPath, !CommandLineTool.isOnUsualPath(commandPath) {
+                    Text("Your terminal may not look in that folder. If `rhino` is not found, add ~/.local/bin to your PATH.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Command line")
+            } footer: {
+                Text("Lets you, and coding agents such as Claude Code or Codex, list, write and run scripts from a terminal with `rhino`. A script run from there asks for your approval in this window before its first run, and secrets cannot be read or allowed from the command line.")
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func installCommand() {
+        do {
+            commandPath = try CommandLineTool.install()
+            commandProblem = nil
+        } catch {
+            commandProblem = error.localizedDescription
+        }
     }
 
     private func setOpensAtLogin(_ on: Bool) {

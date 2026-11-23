@@ -42,7 +42,7 @@ struct ContentView: View {
         .sheet(isPresented: $model.showsPipelineBuilder) {
             PipelineSheet()
         }
-        .sheet(item: $model.pendingApproval, onDismiss: { model.answerApproval(false) }) { approval in
+        .sheet(item: $model.pendingApproval, onDismiss: { model.approvalSheetClosed() }) { approval in
             RunApprovalSheet(approval: approval)
         }
         // So a clicked notification can bring the window back after it was closed.

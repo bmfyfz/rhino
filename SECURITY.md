@@ -19,6 +19,7 @@ Not a vulnerability, because it is how Rhino works (see below):
 - A script can read and write your files and make network requests.
 - A script you allowed to use a secret can send it anywhere.
 - A script that runs commands with `shell()` can get around what Rhino itself checks.
+- A program running as you uses the `rhino` command line tool after you turned it on.
 
 ## Trust model
 
@@ -33,6 +34,8 @@ Read this before you run a script you did not write.
 **Triggers run scripts while nobody is watching.** A script with `// @schedule` or `// @watch` runs by itself while Rhino is open. A `.js` file placed in the scripts folder with such a header runs without anyone pressing Run. Anything that can write to `~/Library/Application Support/Rhino/Scripts` can therefore run code as you; this is the same trust you give the rest of your home folder.
 
 **AI-written scripts ask before they first run.** The AI writer produces JavaScript from a description. With "Try scripts after writing them" on, in Settings > AI (the default), Rhino runs the script once it is written, and repairs and reruns it if it fails, up to two repairs. Before that first run Rhino reads the code and, unless the script only asks, computes and shows, lists what it reaches for: the hosts it contacts, whether it sends data out, the files it writes, the commands it runs, the secrets it uses. It runs only if you agree, and you are asked again only when a later change adds something new. Agreeing also allows the script the saved secrets the list named. The list is read from the code, so it shows what the script says it does; an address or command the script puts together while running is listed as such, not resolved. Running a script by hand counts as agreeing to it as it stands, except for saved secrets, which are always asked about. Turn the setting off to read every script before it runs.
+
+**The command line tool is as trusted as your terminal.** The `rhino` tool is off until you turn it on in Settings > General. While it is on, the app listens on a socket file that only your user account can open; there is no network port. Any program running as you can then list, write and run scripts, which is no more than such a program can already do with a shell. What the tool cannot do: read a secret's value, save a secret, allow a script a secret, or say yes for you. A script it runs asks for your approval in the app when it reaches for something you have not agreed to, and a script it wrote does not run by itself (schedule, watched folder, Shortcuts) until then. These rules cover what goes through the tool: a program that writes a `.js` file straight into the scripts folder is not held back by them, as the paragraph on triggers says.
 
 **AI answers are data.** `ai.ask()` returns text or JSON to the script. Rhino does not run an answer as code. What the script then does with it is up to the script.
 

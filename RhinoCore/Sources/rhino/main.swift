@@ -1,0 +1,3 @@
+import RhinoCLI
+
+RhinoCommand.main()

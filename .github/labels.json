@@ -17,6 +17,7 @@
   { "name": "area: ai", "color": "c5def5", "description": "The AI writer, ai.ask() and providers" },
   { "name": "area: triggers", "color": "c5def5", "description": "Schedules, watched folders and Shortcuts" },
   { "name": "area: app", "color": "c5def5", "description": "The window: editor, logs, output, history and Settings" },
+  { "name": "area: cli", "color": "c5def5", "description": "The rhino command line tool" },
   { "name": "area: examples", "color": "c5def5", "description": "The example scripts" },
   { "name": "area: build", "color": "c5def5", "description": "Building, signing and installing" }
 ]

@@ -1,6 +1,6 @@
 # Architecture
 
-Rhino has two layers: `RhinoCore`, a Swift package that knows how to run scripts, and `App`, the SwiftUI app around it.
+Rhino has two layers: `RhinoCore`, a Swift package that knows how to run scripts, and `App`, the SwiftUI app around it. Beside them is the `rhino` command line tool, which asks the running app to do things and prints the answers.
 
 ## Two layers
 
@@ -31,16 +31,23 @@ RhinoCore/
     Triggers/    Schedule, FolderWatch
     Editing/     SyntaxTokenizer, Reindenter, LineDiff
     Resources/   prelude.js, globals.d.ts, Examples/ (the example scripts, as .js files)
+  Sources/RhinoControl/   what the app and the rhino tool say to each other, and
+                          the socket they say it over. No dependencies.
+  Sources/RhinoCLI/       the rhino tool: its commands and what they print
+  Sources/rhino/          the tool as the package builds it (`swift run rhino`)
   Tests/RhinoCoreTests/   one file per suite, plus Support/
+  Tests/RhinoControlTests/, Tests/RhinoCLITests/
 App/
   Model/      AppModel, RunSession, AISettings, RunHistory, FolderWatcher
+  Control/    ControlService: answers the rhino tool
   Views/
   Settings/
   Support/    Keychain, Shortcuts, syntax theme
   Assets.xcassets
+Tool/         the rhino tool as the Xcode project builds it, to put it in the app
 Tools/
   install.sh  builds a release, signs it, installs it in /Applications
-project.yml   the XcodeGen description of the app target
+project.yml   the XcodeGen description of the app and the tool
 ```
 
 ## How a run works
@@ -68,6 +75,18 @@ project.yml   the XcodeGen description of the app target
 11. When the script's Promise settles, the run ends and `Engine.run` returns a `RunSummary`: the error if any, the result as JSON, the output folder and the times. An error is a `RunError` with the script and line, read from the first stack frame inside a script.
 
 12. The app turns the finished `RunSession` into a `RunRecord` (core, `Codable`): everything the run logged, called, asked, wrote and published, in order. `RunHistory` stores the encoded record.
+
+## The command line tool
+
+`rhino` is a separate program that does nothing by itself. The package has three pieces for it:
+
+- `RhinoControl` is the conversation: `ControlRequest`, `ControlMessage` and the types the answers are made of, plus `ControlListener` and `ControlClient`, which carry them over a Unix socket as one JSON value per line. It depends on nothing, and both the app and the tool link it.
+- `RhinoCLI` is the tool: its commands, built with Swift Argument Parser, and `Render`, which turns answers into text. `Session` finds the app, opens it when it is not running, and turns failures into a message and an exit code.
+- `rhino` is two lines that call `RhinoCommand.main()`. The Xcode project builds the same two lines from `Tool/` and copies the result to `Rhino.app/Contents/Helpers/rhino`.
+
+In the app, `AppModel` starts a `ControlListener` when the setting is on. Each connection carries one request, which `ControlService` answers on the main actor by calling the model: the same functions the window uses, plus a few that end in `FromCommandLine`. A run goes through `runFromCommandLine`, which asks for approval when the script's footprint has something not yet agreed to, starts the run with the trigger `.commandLine`, and passes its events on. `ControlService` sends each event to the tool as a `RunLine` while the run goes, and the whole `RunReport` at the end. When the tool's connection closes early, the task is cancelled, which withdraws the question or stops the run.
+
+The app never trusts the tool with more than a person at the window has, and with less in two places: it cannot answer an approval, and no request touches a secret's value.
 
 ## The AI layer
 
