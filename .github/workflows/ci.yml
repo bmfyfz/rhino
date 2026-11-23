@@ -1,6 +1,7 @@
 name: CI
 
-# Only the core package is tested here; the app target is not built in CI yet.
+# The package is tested here: the engine, and the rhino command line tool
+# against a stand-in for the app. The app target is not built in CI yet.
 
 on:
   push:
@@ -8,6 +9,7 @@ on:
 
 jobs:
   test:
+    # The name is the required check on main; changing it means changing that too.
     name: RhinoCore tests
     # RhinoCore/Package.swift asks for Swift tools 6.4 and macOS 27. The
     # macos-latest image is still macOS 26 with Swift 6.3; GitHub's Xcode 27

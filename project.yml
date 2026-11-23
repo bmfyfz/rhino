@@ -14,6 +14,25 @@ targets:
       - App
     dependencies:
       - package: RhinoCore
+        product: RhinoCore
+      - package: RhinoCore
+        product: RhinoControl
+      # Built first, so that the script below finds it; not linked into the app.
+      - target: RhinoTool
+        embed: false
+        link: false
+    postBuildScripts:
+      # The `rhino` command line tool travels inside the app. Not in
+      # Contents/MacOS: on a disk that ignores case, `rhino` and the app's
+      # own `Rhino` would be the same file.
+      - name: Put the rhino command line tool in the app
+        script: |
+          mkdir -p "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Helpers"
+          cp -f "${BUILT_PRODUCTS_DIR}/rhino" "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Helpers/rhino"
+        inputFiles:
+          - $(BUILT_PRODUCTS_DIR)/rhino
+        outputFiles:
+          - $(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/rhino
     info:
       path: Info.plist
       properties:
@@ -35,3 +54,22 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         ENABLE_APP_SANDBOX: NO
         ENABLE_HARDENED_RUNTIME: NO
+  RhinoTool:
+    type: tool
+    platform: macOS
+    sources:
+      - Tool
+    dependencies:
+      - package: RhinoCore
+        product: RhinoCLI
+    settings:
+      base:
+        PRODUCT_NAME: rhino
+        # Not "rhino": next to the app's module "Rhino" that would be one
+        # file on a disk that ignores case.
+        PRODUCT_MODULE_NAME: RhinoTool
+        SWIFT_VERSION: "6.0"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+        SKIP_INSTALL: YES

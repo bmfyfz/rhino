@@ -47,6 +47,8 @@ final class RunSession: Identifiable {
         case folder
         /// The Shortcuts app asked for it.
         case shortcut
+        /// The `rhino` command line tool asked for it.
+        case commandLine
     }
 
     let id: UUID

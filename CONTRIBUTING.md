@@ -14,7 +14,7 @@ open Rhino.xcodeproj
 
 `Rhino.xcodeproj` is generated from `project.yml` and is not checked in. Run `xcodegen generate` again after you add, move or delete files in `App/`, or change `project.yml`.
 
-Run the core's tests from the command line:
+Run the package's tests (the engine, and the `rhino` tool against a stand-in app) from the command line:
 
 ```sh
 cd RhinoCore && swift test
@@ -31,7 +31,8 @@ Things to know while developing:
 - If it can work without a window, the Keychain or the app's settings, it belongs in `RhinoCore`, with a test.
 - If it needs AppKit, SwiftUI, SwiftData, the Keychain, notifications or App Intents, it belongs in `App`.
 - When the core needs something only the app can provide, add a protocol in the core and implement it in the app, as `SecretStore`, `MemoryStore`, `AIProvider` and `ScriptProvider` do.
-- `RhinoCore` has no third-party dependencies. Please keep it that way unless there is a strong reason.
+- `RhinoCore` has no third-party dependencies. Please keep it that way unless there is a strong reason. The command line tool (`RhinoCLI`) uses Swift Argument Parser, and nothing else in the package does.
+- What the `rhino` tool and the app say to each other is in `RhinoControl`. A new command is a case in `ControlRequest`, an answer in `ControlService` (app), a command in `RhinoCLI`, a test in `RhinoCLITests`, and a row in [docs/CLI.md](docs/CLI.md).
 
 ## Conventions
 

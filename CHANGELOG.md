@@ -17,6 +17,7 @@ The first public version, 0.1.0. There is no prebuilt download yet; you build it
 - **History**: every run with its log, HTTP and AI calls, inputs and outputs, and earlier versions of every script.
 - **Shared functions** defined once in Settings and usable in every script; folders and search for scripts.
 - **Safety**: a script the AI wrote lists what it reaches for and asks before its first run; a script has to be allowed each saved secret; secrets are blanked in everything a run shows or keeps; limits on AI calls and notifications per run.
+- **A command line tool**, `rhino`, to list, write, check and run scripts from a terminal, for people and for coding agents. Off until turned on in Settings; a script run from it asks for approval in the app, and it cannot touch secrets.
 - Thirteen example scripts that run against public services.
 
 [Unreleased]: https://github.com/bmfyfz/rhino/commits/main

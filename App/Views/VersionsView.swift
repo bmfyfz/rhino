@@ -140,6 +140,7 @@ extension ScriptVersion {
         case .repair: "AI repair after a failed run"
         case .undo: "AI change undone"
         case .restore(let date): "Restored version of \(date.formatted(date: .abbreviated, time: .shortened))"
+        case .commandLine: "Changed from the command line"
         }
     }
 }

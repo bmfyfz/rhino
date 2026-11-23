@@ -239,6 +239,7 @@ private struct RunStatus: View {
         case .schedule: "Scheduled, \(time)"
         case .folder: "New file, \(time)"
         case .shortcut: "Shortcut, \(time)"
+        case .commandLine: "Command line, \(time)"
         }
     }
 

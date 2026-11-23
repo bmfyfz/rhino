@@ -1,4 +1,5 @@
 import AppKit
+import RhinoControl
 import RhinoCore
 import Observation
 import SwiftUI
@@ -239,6 +240,7 @@ final class AppModel {
         folderWatcher.onNewFile = { [weak self] folder, file in self?.arrived(file, in: folder) }
         updateWatches()
         startScheduler()
+        updateControl()
     }
 
     var selectedScript: Script? {
@@ -342,17 +344,37 @@ final class AppModel {
     /// Moves a script into a folder ("" is the top). Its runs, memory and
     /// versions go with it.
     func move(_ id: String, to folder: String) {
+        do {
+            try relocate(id, to: folder)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Moves a script and returns its new id.
+    @discardableResult
+    private func relocate(_ id: String, to folder: String) throws -> String {
         guard running[id] == nil else {
-            errorMessage = "This script is running. Stop it, or wait for it to finish, before moving it."
-            return
+            throw Problem("This script is running. Stop it, or wait for it to finish, before moving it.")
         }
         if selectedID == id { save() }
         do {
             let moved = try store.move(id, to: folder)
             adopt([id: moved])
             collapsedFolders.remove(folder)
+            return moved
         } catch {
-            errorMessage = "Could not move the script: \(error.localizedDescription)"
+            throw Problem("Could not move the script: \(error.localizedDescription)")
+        }
+    }
+
+    /// Something that could not be done, in words that are shown as they are.
+    struct Problem: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+
+        init(_ message: String) {
+            self.message = message
         }
     }
 
@@ -402,6 +424,7 @@ final class AppModel {
             history[new] = history.removeValue(forKey: old)
             inputFiles[new] = inputFiles.removeValue(forKey: old)
             approvals[new] = approvals.removeValue(forKey: old)
+            if writtenFromOutside.remove(old) != nil { writtenFromOutside.insert(new) }
             // The run on screen names the script by its old id; the history's copy is shown instead.
             sessions[old] = nil
         }
@@ -450,6 +473,7 @@ final class AppModel {
             grants.forget(script: id)
             versions.removeAll(of: id)
             approvals[id] = nil
+            writtenFromOutside.remove(id)
             scripts = store.scripts()
             if selectedID == nil { select(scripts.first?.id) }
         } catch {
@@ -677,28 +701,125 @@ final class AppModel {
 
     // MARK: - Approval
 
-    /// A question to the user: may this script, which the AI wrote, run?
+    /// A question to the user: may this script, which they have not run
+    /// themselves as it stands, run?
     struct RunApproval: Identifiable {
+        /// Who wants it run.
+        enum Origin {
+            /// The AI wrote or changed it and wants to try it.
+            case ai
+            /// The `rhino` command line tool asked for it.
+            case commandLine
+        }
+
         let id = UUID()
         let script: Script
         /// What it reaches for that was not agreed to before.
         let additions: [ScriptFootprint.Item]
         /// Nothing was ever agreed to for this script.
         let isFirst: Bool
+        var origin = Origin.ai
     }
+    /// The question on screen. Others wait their turn behind it.
     var pendingApproval: RunApproval?
-    private var approvalWaiter: CheckedContinuation<Bool, Never>?
+    private var approvalQueue: [(approval: RunApproval, waiter: CheckedContinuation<Bool, Never>)] = []
+    private enum ApprovalSheet {
+        case closed
+        case showing(UUID)
+        /// Answered and told to go, but still leaving the screen.
+        case closing
+    }
+    private var approvalSheet = ApprovalSheet.closed
     /// What each script was last allowed to reach for, by script id. Kept
     /// between launches, so an agreed script is not asked about again.
     private var approvals: [String: Set<String>] = (UserDefaults.standard.dictionary(forKey: "approvedFootprints") as? [String: [String]] ?? [:]).mapValues(Set.init) {
         didSet { UserDefaults.standard.set(approvals.mapValues { $0.sorted() }, forKey: "approvedFootprints") }
     }
 
-    /// The user's answer to the approval sheet. Closing the sheet is a no.
+    /// Scripts the command line tool wrote. While such a script reaches for
+    /// something the person has not agreed to, it does not start by itself:
+    /// not on its schedule, not for a new file, not from Shortcuts. So
+    /// nothing written from outside runs unseen.
+    private var writtenFromOutside = Set(UserDefaults.standard.stringArray(forKey: "scriptsWrittenFromCommandLine") ?? []) {
+        didSet { UserDefaults.standard.set(writtenFromOutside.sorted(), forKey: "scriptsWrittenFromCommandLine") }
+    }
+    /// Held scripts the person has been told about, so they are told once.
+    @ObservationIgnored private var saidHeld: Set<String> = []
+
+    /// The person said yes to what a script does as it stands.
+    private func agree(to footprint: ScriptFootprint, of id: String) {
+        approvals[id] = footprint.keys
+        writtenFromOutside.remove(id)
+        saidHeld.remove(id)
+        // The same question may be waiting a second time, from a tool that
+        // asked again. It has its answer now.
+        let answered = approvalQueue.map(\.approval).filter { waiting in
+            waiting.script.id == id && waiting.additions.allSatisfy { footprint.keys.contains($0.key) }
+        }
+        for approval in answered { settleApproval(approval.id, true) }
+    }
+
+    /// Whether a script has to wait for the person before it may start by itself.
+    private func isHeld(_ script: Script) -> Bool {
+        guard writtenFromOutside.contains(script.id), !unapproved(script.id).isEmpty else { return false }
+        if saidHeld.insert(script.id).inserted {
+            post(
+                title: "\(script.name) is waiting for your approval",
+                body: "It was written from the command line. Run it once in Rhino, and it may run by itself.",
+                script: script, run: UUID()
+            )
+        }
+        return true
+    }
+
+    /// Asks the question and waits for the answer. One question is on
+    /// screen at a time; a second one waits until the first is settled.
+    private func askApproval(_ approval: RunApproval) async -> Bool {
+        await withCheckedContinuation { waiter in
+            approvalQueue.append((approval, waiter))
+            showNextApproval()
+        }
+    }
+
+    private func showNextApproval() {
+        guard case .closed = approvalSheet, let next = approvalQueue.first?.approval else { return }
+        approvalSheet = .showing(next.id)
+        pendingApproval = next
+    }
+
+    /// The user's answer to the question on screen.
     func answerApproval(_ allowed: Bool) {
+        guard case .showing(let id) = approvalSheet else { return }
+        settleApproval(id, allowed)
+    }
+
+    /// Whoever asked has gone away, so the question no longer needs an answer.
+    private func withdrawApproval(_ id: UUID) {
+        settleApproval(id, false)
+    }
+
+    private func settleApproval(_ id: UUID, _ allowed: Bool) {
+        guard let index = approvalQueue.firstIndex(where: { $0.approval.id == id }) else { return }
+        approvalQueue.remove(at: index).waiter.resume(returning: allowed)
+        guard case .showing(let shown) = approvalSheet, shown == id else { return }
+        approvalSheet = .closing
         pendingApproval = nil
-        approvalWaiter?.resume(returning: allowed)
-        approvalWaiter = nil
+        // The sheet says when it has left the screen. Should its window be
+        // gone and nobody say so, the next question must not wait for ever.
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            if case .closing = approvalSheet { approvalSheetClosed() }
+        }
+    }
+
+    /// The sheet has left the screen. Closed without an answer, that is a no.
+    func approvalSheetClosed() {
+        if case .showing(let id) = approvalSheet, let index = approvalQueue.firstIndex(where: { $0.approval.id == id }) {
+            approvalQueue.remove(at: index).waiter.resume(returning: false)
+        }
+        approvalSheet = .closed
+        pendingApproval = nil
+        showNextApproval()
     }
 
     /// Finds out whether the script the AI just wrote works: whether it is
@@ -714,12 +835,9 @@ final class AppModel {
         let additions = footprint.additions(to: approvals[script.id] ?? [])
         if !additions.isEmpty {
             aiActivity = .asking
-            let allowed = await withCheckedContinuation { waiter in
-                approvalWaiter = waiter
-                pendingApproval = RunApproval(script: script, additions: additions, isFirst: approvals[script.id] == nil)
-            }
+            let allowed = await askApproval(RunApproval(script: script, additions: additions, isFirst: approvals[script.id] == nil))
             guard generation == aiGeneration, allowed else { return nil }
-            approvals[script.id] = footprint.keys
+            agree(to: footprint, of: script.id)
             // The sheet named the saved secrets it reads; the yes covers
             // them, so the run does not ask about each one again.
             for case .secret(let name) in additions where secretNames.contains(name) {
@@ -841,7 +959,7 @@ final class AppModel {
         save()
         guard let script = selectedScript else { return }
         // Running it by hand is saying yes to what it does as it stands.
-        approvals[id] = ScriptFootprint(of: source).keys
+        agree(to: ScriptFootprint(of: source), of: id)
         // A run may ask a question or fail, so its log is never left hidden.
         showsOutput = true
         bottomTab = .logs
@@ -851,8 +969,9 @@ final class AppModel {
     /// Starts a run and returns it, or nil when the script is already running.
     /// `files` replaces the files dropped on the script; `data` is what the
     /// script finds in `input.data`.
+    /// `watching` is told of everything the run does, as it does it.
     @discardableResult
-    private func start(_ script: Script, trigger: RunSession.Trigger, files: [URL]? = nil, data: String? = nil) -> RunSession? {
+    private func start(_ script: Script, trigger: RunSession.Trigger, files: [URL]? = nil, data: String? = nil, watching: ((RunEvent) -> Void)? = nil) -> RunSession? {
         let id = script.id
         // One run of a script at a time; a scheduled run that comes due
         // while the last one is still going is skipped.
@@ -885,6 +1004,7 @@ final class AppModel {
         Task {
             for await event in stream {
                 session.apply(event)
+                watching?(event)
                 if case .notification(let notification) = event {
                     post(title: notification.title, body: notification.message, script: script, run: session.id)
                 }
@@ -925,10 +1045,211 @@ final class AppModel {
     func runForShortcut(_ id: String, data: String?, files: [URL]) async throws -> String {
         refreshFromDisk()
         guard let script = scripts.first(where: { $0.id == id }) else { throw ShortcutProblem.unknownScript }
+        guard !isHeld(script) else {
+            throw ShortcutProblem.failed("\(script.name) was written from the command line and is waiting for your approval. Run it once in Rhino.")
+        }
         guard let session = start(script, trigger: .shortcut, files: files, data: data) else { throw ShortcutProblem.busy(script.name) }
         let summary = await withCheckedContinuation { waiters[session.id] = $0 }
         if let error = summary.error { throw ShortcutProblem.failed(error.message) }
         return summary.resultJSON ?? ""
+    }
+
+    // MARK: - Command line
+
+    /// Whether the `rhino` command line tool may control the app. Off until
+    /// the person turns it on: it lets other programs run scripts.
+    var allowsCommandLine = UserDefaults.standard.bool(forKey: ControlProtocol.enabledKey) {
+        didSet {
+            UserDefaults.standard.set(allowsCommandLine, forKey: ControlProtocol.enabledKey)
+            updateControl()
+        }
+    }
+    /// Why the tool cannot be listened for although it is allowed.
+    private(set) var commandLineProblem: String?
+    @ObservationIgnored private var controlListener: ControlListener?
+
+    /// Starts or stops listening for the tool, as the setting says.
+    private func updateControl() {
+        controlListener?.stop()
+        controlListener = nil
+        commandLineProblem = nil
+        guard allowsCommandLine else { return }
+        let service = ControlService(model: self)
+        do {
+            controlListener = try ControlListener { request, connection in
+                await service.answer(request, on: connection)
+            }
+        } catch {
+            commandLineProblem = error.localizedDescription
+        }
+    }
+
+    /// The app is quitting: the socket should not be left behind.
+    func stopControl() {
+        controlListener?.stop()
+        controlListener = nil
+    }
+
+    /// Finds a script the way `run()` does: by its id, its title, or a file
+    /// name no other script shares.
+    func script(called name: String) throws -> Script {
+        refreshFromDisk()
+        guard let id = store.script(named: name)?.id, let script = scripts.first(where: { $0.id == id }) else {
+            throw Problem("No script is called “\(name)”. `rhino list` shows them.")
+        }
+        return script
+    }
+
+    /// What a script reaches for that the person has not agreed to yet.
+    func unapproved(_ id: String) -> [ScriptFootprint.Item] {
+        guard let source = try? store.source(of: id) else { return [] }
+        return ScriptFootprint(of: source).additions(to: approvals[id] ?? [])
+    }
+
+    /// A finished run, read back from the history.
+    func record(of run: UUID) -> RunRecord? {
+        runHistory.record(run)
+    }
+
+    /// Scripts whose run is waiting for the person's yes.
+    var scriptsAwaitingApproval: [String] {
+        approvalQueue.map(\.approval.script.id)
+    }
+
+    /// Creates a script for the command line tool. Without `source` it
+    /// starts from the template.
+    func createFromCommandLine(named name: String, in folder: String, source: String?) throws -> Script {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw Problem("A script needs a name.") }
+        refreshFromDisk()
+        guard !scripts.contains(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
+            throw Problem("There already is a script called “\(name)”. `rhino write` replaces its source.")
+        }
+        var source = source
+        if let text = source {
+            if let mistake = ScriptCompiler.syntaxProblem(in: text) {
+                throw Problem("Not created, because it is not valid JavaScript: \(mistake)")
+            }
+            // The name asked for is the script's name, also when the source does not say so.
+            if ScriptHeader.parse(text)["name"] == nil { source = "// @name \(name)\n" + text }
+        }
+        let script = try store.create(named: name, in: folder, source: source)
+        writtenFromOutside.insert(script.id)
+        scripts = store.scripts()
+        return script
+    }
+
+    /// Replaces a script's source for the command line tool. What it
+    /// replaces is kept as a version.
+    func writeFromCommandLine(_ script: Script, source: String) throws -> Script {
+        let id = script.id
+        if let mistake = ScriptCompiler.syntaxProblem(in: source) {
+            throw Problem("Not saved, because it is not valid JavaScript: \(mistake)")
+        }
+        // New source that does not say what the script is called must not
+        // take its name away: the next command would no longer find it.
+        var source = source
+        if ScriptHeader.parse(source)["name"] == nil, script.name != id {
+            source = "// @name \(script.name)\n" + source
+        }
+        if selectedID == id {
+            switch aiActivity {
+            case .thinking, .writing, .fixing:
+                throw Problem("The AI in Rhino is writing “\(script.name)” right now. Try again when it is done.")
+            case .asking, .trying, nil:
+                // What was typed in the window becomes a version before it is replaced.
+                save()
+            }
+        }
+        let previous = (try? store.source(of: id)) ?? ""
+        guard previous != source else { return script }
+        try store.save(source, to: id)
+        writtenFromOutside.insert(id)
+        saidHeld.remove(id)
+        try? versions.record(source, of: id, reason: .commandLine, previous: previous)
+        // An undo of the AI's change would bring back text from before this one.
+        if selectedID == id { sourceBeforeAI = nil }
+        refreshFromDisk()
+        if selectedID == id { scriptVersions = versions.versions(of: id) }
+        return scripts.first { $0.id == id } ?? script
+    }
+
+    func removeFromCommandLine(_ script: Script) throws {
+        errorMessage = nil
+        delete(script.id)
+        if let problem = errorMessage {
+            errorMessage = nil
+            throw Problem(problem)
+        }
+    }
+
+    func moveFromCommandLine(_ script: Script, to folder: String) throws -> Script {
+        let moved = try relocate(script.id, to: folder)
+        return scripts.first { $0.id == moved } ?? script
+    }
+
+    func stopFromCommandLine(_ script: Script) throws {
+        guard let session = running[script.id] else { throw Problem("“\(script.name)” is not running.") }
+        session.stop()
+    }
+
+    /// Runs a script for the command line tool and returns the finished run.
+    ///
+    /// Nobody is at the window, so its questions take their defaults. If
+    /// the script reaches for something the person has not agreed to, they
+    /// are asked first, in the window, and the tool waits: `waiting` is told
+    /// so. Cancelling the task withdraws the question or stops the run.
+    func runFromCommandLine(
+        _ script: Script, data: String?, files: [URL],
+        waiting: (String) -> Void, events: @escaping (RunEvent) -> Void
+    ) async throws -> RunRecord {
+        let id = script.id
+        if selectedID == id { save() }
+        guard running[id] == nil else {
+            throw Problem("“\(script.name)” is already running. `rhino stop` stops it.")
+        }
+        let source = try store.source(of: id)
+        if let mistake = ScriptCompiler.syntaxProblem(in: source) {
+            throw Problem("“\(script.name)” is not valid JavaScript: \(mistake)")
+        }
+
+        let footprint = ScriptFootprint(of: source)
+        let additions = footprint.additions(to: approvals[id] ?? [])
+        if !additions.isEmpty {
+            let approval = RunApproval(script: script, additions: additions, isFirst: approvals[id] == nil, origin: .commandLine)
+            waiting("Waiting for you to approve “\(script.name)” in Rhino…")
+            // The question is a sheet on the window, which may be closed.
+            openMainWindow?()
+            NSApplication.shared.requestUserAttention(.informationalRequest)
+            let allowed = await withTaskCancellationHandler {
+                await askApproval(approval)
+            } onCancel: {
+                Task { @MainActor in self.withdrawApproval(approval.id) }
+            }
+            guard allowed else {
+                throw Problem("“\(script.name)” was not approved in Rhino, so it did not run.")
+            }
+            // The yes was for the code as it was shown.
+            guard (try? store.source(of: id)) == source else {
+                throw Problem("“\(script.name)” changed while it was waiting for approval. Run it again.")
+            }
+            agree(to: footprint, of: id)
+            for case .secret(let name) in additions where secretNames.contains(name) {
+                grants.allow(script: id, secret: name)
+            }
+            refreshSecretNames()
+        }
+
+        guard let session = start(script, trigger: .commandLine, files: files, data: data, watching: events) else {
+            throw Problem("“\(script.name)” is already running. `rhino stop` stops it.")
+        }
+        _ = await withTaskCancellationHandler {
+            await withCheckedContinuation { waiters[session.id] = $0 }
+        } onCancel: {
+            Task { @MainActor in session.stop() }
+        }
+        guard let record = session.record else { throw Problem("The run ended without a record.") }
+        return record
     }
 
     // MARK: - Watched folders
@@ -967,6 +1288,8 @@ final class AppModel {
     private func runNextArrival(of id: String) {
         guard running[id] == nil, var files = arrivals[id], !files.isEmpty,
               let script = scripts.first(where: { $0.id == id }) else { return }
+        // The files wait with it: its first run by hand is followed by theirs.
+        guard !isHeld(script) else { return }
         let file = files.removeFirst()
         arrivals[id] = files.isEmpty ? nil : files
         start(script, trigger: .folder, files: [file])
@@ -1046,7 +1369,7 @@ final class AppModel {
         for (id, info) in schedules {
             guard let schedule = info.schedule, let next = info.next, next <= now else { continue }
             schedules[id]?.next = schedule.next(after: now)
-            if let script = scripts.first(where: { $0.id == id }) {
+            if let script = scripts.first(where: { $0.id == id }), !isHeld(script) {
                 start(script, trigger: .schedule)
             }
         }
